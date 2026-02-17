@@ -1,0 +1,192 @@
+# Moat Local Development Stack
+#
+# Build context is the PROJECT ROOT (../../) so that Dockerfiles can access
+# both packages/core (shared dep) and the service code in a single COPY step.
+#
+# Usage:
+#   cp infra/local/.env.example infra/local/.env   # first time only
+#   docker compose -f infra/local/docker-compose.yml up -d
+# Or via Makefile:
+#   make docker-up
+#
+# Note: `version` is intentionally omitted – it is obsolete in Compose v2+.
+
+networks:
+  moat-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Postgres 16 – primary data store for capability registry, tenants, receipts
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    networks:
+      - moat-net
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: moat
+      POSTGRES_USER: moat
+      POSTGRES_PASSWORD: moat_dev
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U moat -d moat"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # Redis 7 – rate-limiting counters, short-lived token cache, pub/sub
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks:
+      - moat-net
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ---------------------------------------------------------------------------
+  # Control Plane – capability registry + connection management (port 8001)
+  # ---------------------------------------------------------------------------
+  control-plane:
+    build:
+      context: ../../          # Project root so we can reach packages/core
+      dockerfile: services/control-plane/Dockerfile
+    restart: unless-stopped
+    networks:
+      - moat-net
+    ports:
+      - "8001:8001"
+    env_file:
+      - path: .env
+        required: false   # Falls back to inline `environment` block if .env absent
+    environment:
+      DATABASE_URL: postgresql+asyncpg://moat:moat_dev@postgres:5432/moat
+      REDIS_URL: redis://redis:6379/0
+      SERVICE_PORT: "8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8001/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # Gateway – policy enforcement + routing for capability execution (port 8002)
+  # ---------------------------------------------------------------------------
+  gateway:
+    build:
+      context: ../../
+      dockerfile: services/gateway/Dockerfile
+    restart: unless-stopped
+    networks:
+      - moat-net
+    ports:
+      - "8002:8002"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://moat:moat_dev@postgres:5432/moat
+      REDIS_URL: redis://redis:6379/1
+      CONTROL_PLANE_URL: http://control-plane:8001
+      SERVICE_PORT: "8002"
+    depends_on:
+      control-plane:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8002/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # Trust Plane – verification receipts, audit logs, stats (port 8003)
+  # ---------------------------------------------------------------------------
+  trust-plane:
+    build:
+      context: ../../
+      dockerfile: services/trust-plane/Dockerfile
+    restart: unless-stopped
+    networks:
+      - moat-net
+    ports:
+      - "8003:8003"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://moat:moat_dev@postgres:5432/moat
+      REDIS_URL: redis://redis:6379/2
+      SERVICE_PORT: "8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8003/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # MCP Server – Model Context Protocol interface for AI agent discovery (port 8004)
+  # ---------------------------------------------------------------------------
+  mcp-server:
+    build:
+      context: ../../
+      dockerfile: services/mcp-server/Dockerfile
+    restart: unless-stopped
+    networks:
+      - moat-net
+    ports:
+      - "8004:8004"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      CONTROL_PLANE_URL: http://control-plane:8001
+      TRUST_PLANE_URL: http://trust-plane:8003
+      GATEWAY_URL: http://gateway:8002
+      SERVICE_PORT: "8004"
+    depends_on:
+      control-plane:
+        condition: service_healthy
+      gateway:
+        condition: service_healthy
+      trust-plane:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8004/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s

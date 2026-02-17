@@ -1,0 +1,136 @@
+# Moat – Root pyproject.toml
+#
+# This file configures shared tooling for the entire monorepo:
+#   - ruff  (lint + format)
+#   - mypy  (type checking)
+#   - pytest (test runner, asyncio mode)
+#
+# Individual packages/services may override these in their own pyproject.toml.
+# This file is NOT a package itself – it has no [project] table intentionally.
+# Running `pip install .` from the project root is not meaningful here.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Ruff – lint and format
+# ─────────────────────────────────────────────────────────────────────────────
+[tool.ruff]
+# Target the minimum Python version in use across all services.
+target-version = "py311"
+
+# 120 chars keeps API route definitions and type annotations readable.
+line-length = 120
+
+# Directories ruff should inspect when run from the project root.
+src = ["packages", "services"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort (import order)
+    "UP",  # pyupgrade (use modern Python syntax)
+    "B",   # flake8-bugbear (common bug patterns)
+    "C4",  # flake8-comprehensions (better comprehensions)
+    "PIE", # flake8-pie (misc cleanups)
+    "T20", # flake8-print (no stray print statements in library code)
+    "RET", # flake8-return (return consistency)
+    "SIM", # flake8-simplify
+    "ANN", # flake8-annotations (enforce type hints – set to warn only via ignore)
+]
+ignore = [
+    # Allow `def func(arg=Depends(...))` pattern common in FastAPI.
+    "B008",
+    # ANN101/102 – missing type for self/cls are noise.
+    "ANN101",
+    "ANN102",
+    # ANN401 – `Any` is sometimes intentional for generic shims.
+    "ANN401",
+    # T201 – print() allowed in scripts/ and demo code.
+    "T201",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests don't need full annotation coverage.
+"tests/**/*.py" = ["ANN", "T20"]
+"**/tests/**/*.py" = ["ANN", "T20"]
+# Scripts are entry-points – print is expected.
+"scripts/*.py" = ["T20"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["moat_core"]
+
+[tool.ruff.format]
+# Consistent with black defaults – double quotes, trailing commas.
+quote-style = "double"
+indent-style = "space"
+magic-trailing-comma = true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# mypy – type checking
+# ─────────────────────────────────────────────────────────────────────────────
+[tool.mypy]
+python_version = "3.11"
+
+# Not full strict mode yet – allow gradual adoption.
+# Flip individual flags on as the codebase matures.
+strict = false
+ignore_missing_imports = true
+
+# Pydantic v2 plugin for accurate model type inference.
+plugins = ["pydantic.mypy"]
+
+# Disallow untyped public functions/methods (catch the most impactful gaps).
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+# Warn on unreachable code and redundant casts.
+warn_unreachable = true
+warn_redundant_casts = true
+
+[[tool.mypy.overrides]]
+# Third-party packages that ship no stubs yet.
+module = [
+    "uvicorn.*",
+    "fastapi.*",
+    "httpx.*",
+]
+ignore_missing_imports = true
+
+# ─────────────────────────────────────────────────────────────────────────────
+# pytest
+# ─────────────────────────────────────────────────────────────────────────────
+[tool.pytest.ini_options]
+# asyncio_mode=auto lets pytest-asyncio handle async tests without decorators.
+asyncio_mode = "auto"
+
+testpaths = [
+    "packages",
+    "services",
+]
+
+# Show 10 slowest tests; useful for spotting accidental integration tests in
+# the unit suite.
+addopts = "--tb=short -q --durations=10"
+
+# Markers used across the monorepo (avoids "unknown marker" warnings).
+markers = [
+    "unit: fast, no external dependencies",
+    "integration: may require running services or GCP",
+    "slow: tests taking >5 seconds",
+    "docker: requires docker-compose stack to be up",
+]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# coverage (used with pytest-cov)
+# ─────────────────────────────────────────────────────────────────────────────
+[tool.coverage.run]
+source = ["packages", "services"]
+omit = [
+    "*/tests/*",
+    "*/.venv/*",
+    "*/migrations/*",
+]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 50   # Increase as the test suite matures.
