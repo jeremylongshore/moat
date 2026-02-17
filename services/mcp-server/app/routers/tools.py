@@ -1,0 +1,298 @@
+"""
+app.routers.tools
+~~~~~~~~~~~~~~~~~
+MCP-style tool endpoints for AI agent integration.
+
+These endpoints implement the Model Context Protocol (MCP) tool calling
+contract as REST endpoints. They can be swapped to a full MCP SDK transport
+(stdio, SSE, WebSocket) without changing the business logic.
+
+Tool Naming Convention
+----------------------
+Tools use dot-notation names mirroring the MCP convention:
+``capabilities.list``, ``capabilities.search``, ``capabilities.execute``,
+``capabilities.stats``.
+
+Response Format
+---------------
+All tool endpoints return a standard envelope::
+
+    {
+        "tool": "<tool_name>",
+        "result": { ... },
+        "request_id": "<uuid>"
+    }
+
+Error responses include an ``error`` field instead of (or alongside) ``result``.
+
+Stub Behaviour
+--------------
+When an upstream service (control plane, gateway, trust plane) is not
+running, each tool returns a stub response with ``_stub: true`` and a
+``_note`` explaining the situation. This allows the MCP server to start
+and respond independently of the other services.
+"""
+
+from __future__ import annotations
+
+import logging
+import uuid
+from typing import Any
+
+from fastapi import APIRouter, Request, status
+from pydantic import BaseModel, Field
+
+from app.http_client import (
+    cp_get_capability,
+    cp_list_capabilities,
+    gw_execute,
+    tp_get_stats,
+)
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/tools", tags=["tools"])
+
+
+# ---------------------------------------------------------------------------
+# Shared response envelope
+# ---------------------------------------------------------------------------
+
+class ToolResponse(BaseModel):
+    """Standard MCP tool response envelope."""
+
+    tool: str
+    result: dict[str, Any]
+    request_id: str
+
+
+def _response(tool: str, result: dict[str, Any], request: Request) -> ToolResponse:
+    request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+    return ToolResponse(tool=tool, result=result, request_id=request_id)
+
+
+# ---------------------------------------------------------------------------
+# capabilities.list
+# ---------------------------------------------------------------------------
+
+class ListFilter(BaseModel):
+    provider: str | None = None
+    status: str | None = None
+    verified: bool | None = None
+
+
+class CapabilitiesListRequest(BaseModel):
+    filter: ListFilter = Field(default_factory=ListFilter)
+
+
+@router.post(
+    "/capabilities.list",
+    response_model=ToolResponse,
+    summary="List available capabilities",
+)
+async def tool_capabilities_list(
+    body: CapabilitiesListRequest,
+    request: Request,
+) -> ToolResponse:
+    """List capabilities from the control plane registry.
+
+    **MCP Tool:** ``capabilities.list``
+
+    **Input:**
+    ```json
+    {
+        "filter": {
+            "provider": "openai",   // optional
+            "status": "active",     // optional
+            "verified": true        // optional - filter by trust plane verification
+        }
+    }
+    ```
+
+    **Output:** List of capability objects plus a ``total`` count.
+    """
+    data = await cp_list_capabilities(
+        provider=body.filter.provider,
+        status=body.filter.status,
+    )
+
+    # Apply verified filter locally (trust plane data not merged here for MVP)
+    items = data.get("items", [])
+    if body.filter.verified is not None:
+        # For MVP, filter only if items have verified field; otherwise pass through
+        items = [
+            item for item in items
+            if item.get("verified") == body.filter.verified
+        ]
+        data = {**data, "items": items, "total": len(items)}
+
+    logger.info(
+        "Tool: capabilities.list",
+        extra={"filter": body.filter.model_dump(), "returned": data.get("total", 0)},
+    )
+    return _response("capabilities.list", data, request)
+
+
+# ---------------------------------------------------------------------------
+# capabilities.search
+# ---------------------------------------------------------------------------
+
+class CapabilitiesSearchRequest(BaseModel):
+    query: str = Field(..., min_length=1, description="Search query string")
+
+
+@router.post(
+    "/capabilities.search",
+    response_model=ToolResponse,
+    summary="Search capabilities by name or description",
+)
+async def tool_capabilities_search(
+    body: CapabilitiesSearchRequest,
+    request: Request,
+) -> ToolResponse:
+    """Search capabilities using substring matching on name and description.
+
+    **MCP Tool:** ``capabilities.search``
+
+    **Input:**
+    ```json
+    {"query": "image generation"}
+    ```
+
+    **Output:** Filtered list of matching capabilities.
+
+    Note: This is a simple substring match for MVP. Replace with full-text
+    search (Elasticsearch, pgvector, or Vertex AI Search) for production.
+    """
+    # Fetch all capabilities then filter in-process for MVP
+    data = await cp_list_capabilities()
+    items = data.get("items", [])
+
+    query_lower = body.query.lower()
+    matches = [
+        item for item in items
+        if query_lower in item.get("name", "").lower()
+        or query_lower in item.get("description", "").lower()
+        or any(query_lower in tag for tag in item.get("tags", []))
+    ]
+
+    result = {"items": matches, "total": len(matches), "query": body.query}
+    if data.get("_stub"):
+        result["_stub"] = True
+        result["_note"] = data.get("_note", "")
+
+    logger.info(
+        "Tool: capabilities.search",
+        extra={"query": body.query, "matches": len(matches)},
+    )
+    return _response("capabilities.search", result, request)
+
+
+# ---------------------------------------------------------------------------
+# capabilities.execute
+# ---------------------------------------------------------------------------
+
+class CapabilitiesExecuteRequest(BaseModel):
+    capability_id: str = Field(..., description="ID of the capability to execute")
+    params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Input parameters for the capability",
+    )
+    tenant_id: str = Field(..., description="Tenant making the request")
+    idempotency_key: str | None = Field(
+        default=None,
+        description="Optional idempotency key for safe retries",
+    )
+    scope: str = Field(default="execute", description="Permission scope")
+
+
+@router.post(
+    "/capabilities.execute",
+    response_model=ToolResponse,
+    summary="Execute a capability via the gateway",
+)
+async def tool_capabilities_execute(
+    body: CapabilitiesExecuteRequest,
+    request: Request,
+) -> ToolResponse:
+    """Execute a capability through the Moat gateway pipeline.
+
+    **MCP Tool:** ``capabilities.execute``
+
+    **Input:**
+    ```json
+    {
+        "capability_id": "cap-abc123",
+        "params": {"input": "Hello, world"},
+        "tenant_id": "tenant-xyz",
+        "idempotency_key": "req-001"
+    }
+    ```
+
+    **Output:** Execution receipt including status, result, and latency.
+
+    The gateway enforces:
+    - Policy evaluation (deny if policy not met)
+    - Idempotency (cached receipt returned on duplicate key)
+    - Outcome event emission to trust plane
+    """
+    result = await gw_execute(
+        capability_id=body.capability_id,
+        params=body.params,
+        tenant_id=body.tenant_id,
+        idempotency_key=body.idempotency_key,
+        scope=body.scope,
+    )
+
+    logger.info(
+        "Tool: capabilities.execute",
+        extra={
+            "capability_id": body.capability_id,
+            "tenant_id": body.tenant_id,
+            "status": result.get("status"),
+            "cached": result.get("cached", False),
+        },
+    )
+    return _response("capabilities.execute", result, request)
+
+
+# ---------------------------------------------------------------------------
+# capabilities.stats
+# ---------------------------------------------------------------------------
+
+class CapabilitiesStatsRequest(BaseModel):
+    capability_id: str = Field(..., description="ID of the capability to retrieve stats for")
+
+
+@router.post(
+    "/capabilities.stats",
+    response_model=ToolResponse,
+    summary="Get reliability stats for a capability",
+)
+async def tool_capabilities_stats(
+    body: CapabilitiesStatsRequest,
+    request: Request,
+) -> ToolResponse:
+    """Retrieve rolling 7-day reliability statistics from the trust plane.
+
+    **MCP Tool:** ``capabilities.stats``
+
+    **Input:**
+    ```json
+    {"capability_id": "cap-abc123"}
+    ```
+
+    **Output:** Reliability stats including success rate, p95 latency,
+    verification status, and trust signals (should_hide, should_throttle).
+    """
+    result = await tp_get_stats(body.capability_id)
+
+    logger.info(
+        "Tool: capabilities.stats",
+        extra={
+            "capability_id": body.capability_id,
+            "success_rate_7d": result.get("success_rate_7d"),
+            "verified": result.get("verified"),
+        },
+    )
+    return _response("capabilities.stats", result, request)
