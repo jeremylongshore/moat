@@ -94,9 +94,7 @@ def configure_auth(
                 f"'{environment}' environment. "
                 f"Only 'local' and 'test' environments can disable auth."
             )
-        logger.warning(
-            "Authentication is DISABLED (MOAT_AUTH_DISABLED=true)"
-        )
+        logger.warning("Authentication is DISABLED (MOAT_AUTH_DISABLED=true)")
     elif not config.jwt_secret or len(config.jwt_secret) < _MIN_SECRET_LENGTH:
         raise RuntimeError(
             f"MOAT_JWT_SECRET must be at least {_MIN_SECRET_LENGTH} "

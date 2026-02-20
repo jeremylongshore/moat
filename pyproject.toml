@@ -68,6 +68,13 @@ skip-magic-trailing-comma = false
 [tool.mypy]
 python_version = "3.11"
 explicit_package_bases = true
+mypy_path = [
+    "packages/core",
+    "services/control-plane",
+    "services/gateway",
+    "services/trust-plane",
+    "services/mcp-server",
+]
 
 # Not full strict mode yet – allow gradual adoption.
 # Flip individual flags on as the codebase matures.
