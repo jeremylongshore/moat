@@ -21,22 +21,25 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
+from typing import Annotated, Any
 
 import httpx
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from moat_core.auth import get_current_tenant
 from pydantic import BaseModel, Field
 
 from app.adapters.base import registry as adapter_registry
+from app.adapters.slack import SlackAdapter
 from app.adapters.stub import StubAdapter
 from app.capability_cache import get_capability
 from app.config import settings
 from app.idempotency_store import idempotency_store
 from app.policy_bridge import evaluate_policy
 
-# Register the stub adapter so executions work out of the box
+# Register adapters — stub for dev fallback, slack for real provider
 adapter_registry.register(StubAdapter())
+adapter_registry.register(SlackAdapter())
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +50,16 @@ router = APIRouter(prefix="/execute", tags=["execution"])
 # Request / Response schemas
 # ---------------------------------------------------------------------------
 
+
 class ExecuteRequest(BaseModel):
     """Payload for a capability execution request."""
 
     params: dict[str, Any] = Field(
         default_factory=dict,
-        description="Input parameters for the capability (validated against capability's input_schema)",
+        description=(
+            "Input parameters for the capability "
+            "(validated against capability's input_schema)"
+        ),
     )
     tenant_id: str = Field(..., min_length=1, description="Tenant making the request")
     scope: str = Field(
@@ -91,6 +98,7 @@ class ReceiptResponse(BaseModel):
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _build_receipt(
     capability_id: str,
     tenant_id: str,
@@ -124,7 +132,7 @@ async def _emit_outcome_event(receipt: dict[str, Any]) -> None:
         "receipt_id": receipt["receipt_id"],
         "execution_status": receipt["status"],
         "latency_ms": receipt.get("latency_ms", 0),
-        "occurred_at": datetime.now(timezone.utc).isoformat(),
+        "occurred_at": datetime.now(UTC).isoformat(),
     }
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -135,7 +143,10 @@ async def _emit_outcome_event(receipt: dict[str, Any]) -> None:
             if response.status_code not in (200, 201, 204):
                 logger.warning(
                     "Trust plane returned unexpected status",
-                    extra={"status_code": response.status_code, "receipt_id": receipt["receipt_id"]},
+                    extra={
+                        "status_code": response.status_code,
+                        "receipt_id": receipt["receipt_id"],
+                    },
                 )
     except httpx.HTTPError as exc:
         # Non-fatal: trust plane stats may lag, but execution is not blocked.
@@ -149,13 +160,15 @@ async def _emit_outcome_event(receipt: dict[str, Any]) -> None:
 # Endpoint
 # ---------------------------------------------------------------------------
 
+
 @router.post(
     "/{capability_id}",
     response_model=ReceiptResponse,
     summary="Execute a capability",
     responses={
         200: {"description": "Execution succeeded (or idempotency cache hit)"},
-        403: {"description": "Policy denied the execution"},
+        401: {"description": "Authentication required"},
+        403: {"description": "Policy denied the execution or tenant mismatch"},
         404: {"description": "Capability not found"},
         422: {"description": "Invalid request parameters"},
         502: {"description": "Upstream adapter failure"},
@@ -165,6 +178,7 @@ async def execute_capability(
     capability_id: str,
     body: ExecuteRequest,
     request: Request,
+    auth_tenant_id: Annotated[str, Depends(get_current_tenant)],
 ) -> ReceiptResponse:
     """Execute a capability through the full Moat pipeline.
 
@@ -180,6 +194,24 @@ async def execute_capability(
     8. Return the receipt
     """
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
+
+    # ------------------------------------------------------------------
+    # Step 0: Verify tenant_id in body matches authenticated tenant
+    # ------------------------------------------------------------------
+    if body.tenant_id != auth_tenant_id:
+        logger.warning(
+            "Tenant ID mismatch",
+            extra={
+                "body_tenant_id": body.tenant_id,
+                "auth_tenant_id": auth_tenant_id,
+                "capability_id": capability_id,
+                "request_id": request_id,
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tenant ID in request body does not match authenticated tenant",
+        )
 
     # ------------------------------------------------------------------
     # Step 1: Fetch capability
@@ -242,7 +274,9 @@ async def execute_capability(
     # Step 4: Idempotency check
     # ------------------------------------------------------------------
     if body.idempotency_key:
-        cached_receipt = idempotency_store.get(body.tenant_id, body.idempotency_key)
+        cached_receipt = await idempotency_store.get(
+            body.tenant_id, body.idempotency_key
+        )
         if cached_receipt is not None:
             logger.info(
                 "Idempotency cache hit - returning cached receipt",
@@ -271,7 +305,7 @@ async def execute_capability(
     provider = capability.get("provider", "stub")
     adapter = adapter_registry.get_or_stub(provider)
 
-    start = datetime.now(timezone.utc)
+    start = datetime.now(UTC)
     try:
         result = await adapter.execute(
             capability_id=capability_id,
@@ -291,11 +325,12 @@ async def execute_capability(
             },
             exc_info=True,
         )
-        # Still build a failure receipt rather than returning a raw 500
-        result = {"error": str(exc), "provider": provider}
+        # Still build a failure receipt rather than returning a raw 500.
+        # Don't leak internal error details to client.
+        result = {"error": "adapter_execution_failed", "provider": provider}
         exec_status = "failure"
 
-    end = datetime.now(timezone.utc)
+    end = datetime.now(UTC)
     latency_ms = (end - start).total_seconds() * 1000
 
     # ------------------------------------------------------------------
@@ -316,13 +351,14 @@ async def execute_capability(
     # Step 8: Emit outcome event to trust plane (best-effort)
     # ------------------------------------------------------------------
     import asyncio  # noqa: PLC0415 - local import to keep module clean
+
     asyncio.ensure_future(_emit_outcome_event(receipt))
 
     # ------------------------------------------------------------------
     # Step 9: Store in idempotency cache (only for successful executions)
     # ------------------------------------------------------------------
     if body.idempotency_key and exec_status == "success":
-        idempotency_store.set(body.tenant_id, body.idempotency_key, receipt)
+        await idempotency_store.set(body.tenant_id, body.idempotency_key, receipt)
 
     # ------------------------------------------------------------------
     # Step 10: Return receipt

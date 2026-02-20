@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from app.adapters.base import AdapterInterface
@@ -99,5 +99,5 @@ class StubAdapter(AdapterInterface):
             "echo_params": params,
             "latency_ms": latency_ms,
             "stub": True,
-            "executed_at": datetime.now(timezone.utc).isoformat(),
+            "executed_at": datetime.now(UTC).isoformat(),
         }

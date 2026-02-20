@@ -20,11 +20,16 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
-async def _get(url: str, *, stub_response: dict[str, Any]) -> dict[str, Any]:
+async def _get(
+    url: str,
+    *,
+    params: dict[str, str] | None = None,
+    stub_response: dict[str, Any],
+) -> dict[str, Any]:
     """Perform a GET request, returning ``stub_response`` on any HTTP error."""
     try:
         async with httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT) as client:
-            resp = await client.get(url)
+            resp = await client.get(url, params=params)
             resp.raise_for_status()
             return resp.json()
     except httpx.HTTPError as exc:
@@ -53,19 +58,20 @@ async def _post(
 # Control Plane
 # ---------------------------------------------------------------------------
 
+
 async def cp_list_capabilities(
     provider: str | None = None,
     status: str | None = None,
 ) -> dict[str, Any]:
-    params: list[str] = []
+    url = f"{settings.CONTROL_PLANE_URL}/capabilities"
+    query_params: dict[str, str] = {}
     if provider:
-        params.append(f"provider={provider}")
+        query_params["provider"] = provider
     if status:
-        params.append(f"status={status}")
-    qs = ("?" + "&".join(params)) if params else ""
-    url = f"{settings.CONTROL_PLANE_URL}/capabilities{qs}"
+        query_params["status"] = status
     return await _get(
         url,
+        params=query_params or None,
         stub_response={
             "items": [],
             "total": 0,
@@ -99,6 +105,7 @@ async def cp_get_capability(capability_id: str) -> dict[str, Any] | None:
 # ---------------------------------------------------------------------------
 # Gateway
 # ---------------------------------------------------------------------------
+
 
 async def gw_execute(
     capability_id: str,
@@ -135,6 +142,7 @@ async def gw_execute(
 # ---------------------------------------------------------------------------
 # Trust Plane
 # ---------------------------------------------------------------------------
+
 
 async def tp_get_stats(capability_id: str) -> dict[str, Any]:
     url = f"{settings.TRUST_PLANE_URL}/capabilities/{capability_id}/stats"

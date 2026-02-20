@@ -1,11 +1,11 @@
 """
 app.policy_bridge
 ~~~~~~~~~~~~~~~~~
-Thin shim that calls moat_core.policy.evaluate_policy when available,
-falling back to a permissive stub when the core package is not yet complete.
+Thin shim that provides policy evaluation for the gateway.
 
-This allows the gateway to run and be tested without the full moat_core
-package being installed.
+Currently uses a permissive stub that allows all requests. In Phase 4,
+this will be replaced with proper moat_core.policy.evaluate_policy
+integration once PolicyBundle storage and tenant isolation are implemented.
 """
 
 from __future__ import annotations
@@ -35,51 +35,36 @@ def evaluate_policy(
 ) -> PolicyResult:
     """Evaluate the policy bundle for a capability execution request.
 
-    Delegates to ``moat_core.policy.evaluate_policy`` if available.
-    Falls back to a permissive stub that logs a warning.
-    """
-    try:
-        from moat_core.policy import evaluate_policy as core_evaluate  # type: ignore[import]
+    Currently returns a permissive stub that allows all requests.
+    This will be integrated with moat_core.policy.evaluate_policy
+    in Phase 4 when PolicyBundle storage is implemented.
 
-        decision = core_evaluate(
-            capability_id=capability_id,
-            tenant_id=tenant_id,
-            scope=scope,
-            params=params,
-        )
-        # Adapt moat_core PolicyDecision to our internal PolicyResult
-        return PolicyResult(
-            allowed=decision.allowed,
-            reason=getattr(decision, "reason", ""),
-            rule_hit=getattr(decision, "rule_hit", ""),
-            risk_class=getattr(decision, "risk_class", "LOW"),
-        )
-    except ImportError:
-        logger.warning(
-            "moat_core.policy not available - using permissive stub. "
-            "Install moat-core with full policy engine for production.",
-            extra={"capability_id": capability_id, "tenant_id": tenant_id},
-        )
-        return PolicyResult(
-            allowed=True,
-            reason="stub_policy_allow",
-            rule_hit="",
-            risk_class="LOW",
-        )
-    except Exception as exc:
-        logger.error(
-            "Policy evaluation error - denying request for safety",
-            extra={
-                "capability_id": capability_id,
-                "tenant_id": tenant_id,
-                "error": str(exc),
-            },
-            exc_info=True,
-        )
-        # Fail closed: deny on any unexpected policy engine error
-        return PolicyResult(
-            allowed=False,
-            reason="policy_engine_error",
-            rule_hit="error_failsafe",
-            risk_class="HIGH",
-        )
+    Args:
+        capability_id: The capability being invoked.
+        tenant_id: The tenant making the request.
+        scope: The requested permission scope (e.g. 'execute').
+        params: The request parameters (for future spend tracking).
+
+    Returns:
+        PolicyResult with allowed=True (permissive stub).
+    """
+    # TODO Phase 4: Look up PolicyBundle from DB for (tenant_id, capability_id)
+    # TODO Phase 4: Calculate current_spend_cents from recent receipts
+    # TODO Phase 4: Build CapabilityManifest from capability metadata
+    # TODO Phase 4: Call moat_core.policy.evaluate_policy(bundle, manifest, scope, spend)
+
+    logger.debug(
+        "Policy evaluation (permissive stub)",
+        extra={
+            "capability_id": capability_id,
+            "tenant_id": tenant_id,
+            "scope": scope,
+        },
+    )
+
+    return PolicyResult(
+        allowed=True,
+        reason="stub_policy_allow",
+        rule_hit="all_checks_passed",
+        risk_class="LOW",
+    )

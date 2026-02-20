@@ -8,7 +8,7 @@ serialisation round-trips.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
@@ -24,7 +24,6 @@ from moat_core import (
     Receipt,
     RiskClass,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -81,9 +80,9 @@ class TestCapabilityManifest:
         assert m.status == CapabilityStatus.DRAFT
 
     def test_timestamps_default_to_utc_now(self, manifest_kwargs: dict) -> None:
-        before = datetime.now(tz=timezone.utc)
+        before = datetime.now(tz=UTC)
         m = CapabilityManifest(**manifest_kwargs)
-        after = datetime.now(tz=timezone.utc)
+        after = datetime.now(tz=UTC)
         assert before <= m.created_at <= after
         assert before <= m.updated_at <= after
 
@@ -100,13 +99,15 @@ class TestCapabilityManifest:
         "bad_version",
         ["1.0", "v1.0.0", "1.0.0.0", "latest", "", "1.0.0-"],
     )
-    def test_invalid_semver_raises(self, manifest_kwargs: dict, bad_version: str) -> None:
+    def test_invalid_semver_raises(
+        self, manifest_kwargs: dict, bad_version: str
+    ) -> None:
         kwargs = {**manifest_kwargs, "version": bad_version}
         with pytest.raises(ValidationError, match="semver"):
             CapabilityManifest(**kwargs)
 
     def test_updated_before_created_raises(self, manifest_kwargs: dict) -> None:
-        now = datetime.now(tz=timezone.utc)
+        now = datetime.now(tz=UTC)
         manifest_kwargs["created_at"] = now
         manifest_kwargs["updated_at"] = now - timedelta(hours=1)
         with pytest.raises(ValidationError, match="updated_at"):
@@ -368,7 +369,12 @@ class TestEnums:
         assert set(CapabilityStatus) == {"draft", "published", "deprecated", "archived"}
 
     def test_execution_status_values(self) -> None:
-        assert set(ExecutionStatus) == {"success", "failure", "timeout", "policy_denied"}
+        assert set(ExecutionStatus) == {
+            "success",
+            "failure",
+            "timeout",
+            "policy_denied",
+        }
 
     def test_error_taxonomy_values(self) -> None:
         assert set(ErrorTaxonomy) == {

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -73,7 +73,7 @@ class ErrorTaxonomy(StrEnum):
 
 def _utcnow() -> datetime:
     """Return current UTC time with timezone awareness."""
-    return datetime.now(tz=timezone.utc)
+    return datetime.now(tz=UTC)
 
 
 def _new_uuid() -> str:
@@ -123,21 +123,27 @@ class CapabilityManifest(_FrozenModel):
         )
     """
 
-    id: str = Field(..., min_length=1, description="Stable unique capability identifier.")
+    id: str = Field(
+        ..., min_length=1, description="Stable unique capability identifier."
+    )
     name: str = Field(..., min_length=1, description="Human-readable display name.")
     version: str = Field(
         ...,
         description="Semantic version string (semver, e.g. '1.2.3' or '2.0.0-beta.1').",
     )
     provider: str = Field(
-        ..., min_length=1, description="Identifier of the organisation publishing this capability."
+        ...,
+        min_length=1,
+        description="Identifier of the organisation publishing this capability.",
     )
     method: str = Field(
         ...,
         min_length=1,
         description="HTTP method + path, e.g. 'POST /v1/search'.",
     )
-    description: str = Field(..., min_length=1, description="Plain-English capability description.")
+    description: str = Field(
+        ..., min_length=1, description="Plain-English capability description."
+    )
     scopes: list[str] = Field(
         default_factory=list,
         description="OAuth-style scopes required to invoke this capability.",
@@ -180,7 +186,7 @@ class CapabilityManifest(_FrozenModel):
         return v
 
     @model_validator(mode="after")
-    def _updated_not_before_created(self) -> "CapabilityManifest":
+    def _updated_not_before_created(self) -> CapabilityManifest:
         if self.updated_at < self.created_at:
             raise ValueError("updated_at must not be earlier than created_at")
         return self
@@ -236,11 +242,15 @@ class Receipt(_FrozenModel):
         min_length=64,
         max_length=64,
     )
-    latency_ms: float = Field(..., ge=0.0, description="Wall-clock latency in milliseconds.")
+    latency_ms: float = Field(
+        ..., ge=0.0, description="Wall-clock latency in milliseconds."
+    )
     status: ExecutionStatus
     error_code: str | None = Field(
         default=None,
-        description="Short machine-readable error code, present on non-success outcomes.",
+        description=(
+            "Short machine-readable error code, present on non-success outcomes."
+        ),
     )
     provider_request_id: str | None = Field(
         default=None,
@@ -251,7 +261,9 @@ class Receipt(_FrozenModel):
     @classmethod
     def _validate_sha256_hex(cls, v: str, info: Any) -> str:
         if not all(c in "0123456789abcdef" for c in v.lower()):
-            raise ValueError(f"{info.field_name} must be a lowercase hex SHA-256 digest")
+            raise ValueError(
+                f"{info.field_name} must be a lowercase hex SHA-256 digest"
+            )
         return v.lower()
 
 
@@ -290,15 +302,11 @@ class OutcomeEvent(_FrozenModel):
     timestamp: datetime = Field(default_factory=_utcnow)
 
     @model_validator(mode="after")
-    def _error_taxonomy_on_failure(self) -> "OutcomeEvent":
+    def _error_taxonomy_on_failure(self) -> OutcomeEvent:
         if not self.success and self.error_taxonomy is None:
-            raise ValueError(
-                "error_taxonomy must be set when success=False"
-            )
+            raise ValueError("error_taxonomy must be set when success=False")
         if self.success and self.error_taxonomy is not None:
-            raise ValueError(
-                "error_taxonomy must be None when success=True"
-            )
+            raise ValueError("error_taxonomy must be None when success=True")
         return self
 
 

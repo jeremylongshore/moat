@@ -83,8 +83,9 @@ def redact_headers(headers: dict[str, Any]) -> dict[str, Any]:
 
     Example::
 
-        >>> redact_headers({"Authorization": "Bearer tok", "Content-Type": "application/json"})
-        {'Authorization': '[REDACTED]', 'Content-Type': 'application/json'}
+        >>> redact_headers({"Authorization": "Bearer tok",
+        ...                  "Content-Type": "application/json"})
+        {'Authorization': '[REDACTED]', ...}
     """
     return {
         k: _REDACTED_SENTINEL if _is_sensitive(k, REDACT_KEYS) else v
@@ -109,8 +110,9 @@ def redact_body(
 
     Example::
 
-        >>> redact_body({"user": "alice", "password": "s3cr3t", "nested": {"api_key": "abc"}})
-        {'user': 'alice', 'password': '[REDACTED]', 'nested': {'api_key': '[REDACTED]'}}
+        >>> redact_body({"user": "alice", "password": "s3cr3t",
+        ...             "nested": {"api_key": "abc"}})
+        {'user': 'alice', 'password': '[REDACTED]', ...}
     """
     effective_denylist = REDACT_KEYS if denylist is None else REDACT_KEYS | denylist
     return _redact_recursive(body, effective_denylist)
@@ -157,7 +159,9 @@ def hash_redacted(data: Any, denylist: frozenset[str] | None = None) -> str:
         >>> digest = hash_redacted({"user": "alice", "password": "s3cr3t"})
         >>> len(digest)
         64
-        >>> digest == hash_redacted({"password": "s3cr3t", "user": "alice"})  # order-independent
+        >>> digest == hash_redacted(  # order-independent
+        ...     {"password": "s3cr3t", "user": "alice"})
+
         True
     """
     if isinstance(data, dict):

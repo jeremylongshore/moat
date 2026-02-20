@@ -40,9 +40,6 @@ select = [
 ignore = [
     # Allow `def func(arg=Depends(...))` pattern common in FastAPI.
     "B008",
-    # ANN101/102 – missing type for self/cls are noise.
-    "ANN101",
-    "ANN102",
     # ANN401 – `Any` is sometimes intentional for generic shims.
     "ANN401",
     # T201 – print() allowed in scripts/ and demo code.
@@ -63,7 +60,7 @@ known-first-party = ["moat_core"]
 # Consistent with black defaults – double quotes, trailing commas.
 quote-style = "double"
 indent-style = "space"
-magic-trailing-comma = true
+skip-magic-trailing-comma = false
 
 # ─────────────────────────────────────────────────────────────────────────────
 # mypy – type checking

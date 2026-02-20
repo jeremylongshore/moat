@@ -3,9 +3,8 @@ app.scoring
 ~~~~~~~~~~~
 Trust scoring engine for Moat capability reliability.
 
-StatsStore
-    Ingests OutcomeEvents and maintains rolling per-capability statistics.
-    Computes 7-day success rate and p95 latency from recent events.
+Persists OutcomeEvents to the database and computes rolling 7-day
+statistics using SQL queries with Python-side aggregation.
 
 should_hide(stats) -> bool
     Returns True if the capability's success rate is below the 80% threshold
@@ -14,22 +13,17 @@ should_hide(stats) -> bool
 should_throttle(stats) -> bool
     Returns True if the capability's p95 latency exceeds 10,000 ms, warranting
     automatic request throttling at the gateway.
-
-Data model
-----------
-Events are stored in memory as a deque bounded by 7 days. In production,
-this should be backed by a time-series store (e.g. Redis sorted sets,
-TimescaleDB, or BigQuery) to support horizontal scaling.
 """
 
 from __future__ import annotations
 
 import logging
-import statistics
-from collections import defaultdict, deque
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
-from typing import Any
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+
+from moat_core.db import OutcomeEventRow
+from sqlalchemy import distinct, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import settings
 
@@ -37,9 +31,6 @@ logger = logging.getLogger(__name__)
 
 _WINDOW_DAYS = 7
 _WINDOW = timedelta(days=_WINDOW_DAYS)
-
-# Rolling window for 24h hide evaluation
-_HIDE_WINDOW = timedelta(hours=24)
 
 
 @dataclass
@@ -59,82 +50,98 @@ class CapabilityStats:
     """Computed reliability stats for a single capability."""
 
     capability_id: str
-    success_rate_7d: float           # 0.0 - 1.0
-    p95_latency_ms: float            # milliseconds
+    success_rate_7d: float  # 0.0 - 1.0
+    p95_latency_ms: float  # milliseconds
     total_executions_7d: int
     last_checked: datetime | None
     verified: bool
 
 
 class StatsStore:
-    """In-memory rolling window stats store.
+    """DB-backed rolling window stats store.
 
-    Maintains a per-capability deque of ``EventRecord`` objects covering
-    the trailing 7 days. Expired events are pruned on each :meth:`record`
-    call to keep memory bounded.
+    Persists outcome events and computes 7-day stats by querying
+    the database and aggregating in Python (works with both
+    Postgres and SQLite).
     """
 
     def __init__(self) -> None:
-        # capability_id -> deque of EventRecord (7-day window)
-        self._events: dict[str, deque[EventRecord]] = defaultdict(deque)
-        self._last_verified: dict[str, datetime] = {}
+        self._session_factory: async_sessionmaker[AsyncSession] | None = None
 
-    def record(self, event: EventRecord) -> None:
-        """Ingest a new outcome event, pruning events older than 7 days."""
-        q = self._events[event.capability_id]
-        q.append(event)
-        self._prune(event.capability_id)
+    def configure(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._session_factory = session_factory
+
+    def _session(self) -> AsyncSession:
+        if self._session_factory is None:
+            raise RuntimeError(
+                "StatsStore not configured. Call configure() during lifespan."
+            )
+        return self._session_factory()
+
+    async def record(self, event: EventRecord, event_id: str = "") -> None:
+        """Persist a new outcome event."""
+        from uuid import uuid4
+
+        async with self._session() as session:
+            row = OutcomeEventRow(
+                event_id=event_id or str(uuid4()),
+                capability_id=event.capability_id,
+                tenant_id=event.tenant_id,
+                receipt_id=event.receipt_id,
+                success=event.success,
+                latency_ms=event.latency_ms,
+                occurred_at=event.occurred_at,
+            )
+            session.add(row)
+            await session.commit()
+
         logger.debug(
             "Event recorded",
             extra={
                 "capability_id": event.capability_id,
                 "success": event.success,
                 "latency_ms": event.latency_ms,
-                "window_size": len(q),
             },
         )
 
-    def _prune(self, capability_id: str) -> None:
-        """Remove events older than the 7-day rolling window."""
-        cutoff = datetime.now(timezone.utc) - _WINDOW
-        q = self._events[capability_id]
-        while q and q[0].occurred_at < cutoff:
-            q.popleft()
-
-    def get_stats(self, capability_id: str) -> CapabilityStats:
+    async def get_stats(self, capability_id: str) -> CapabilityStats:
         """Compute current reliability stats for ``capability_id``.
 
-        Returns
-        -------
-        CapabilityStats
-            Computed stats. If no events have been recorded, returns zero-
-            execution defaults.
+        Fetches events from the last 7 days and computes stats in Python.
         """
-        self._prune(capability_id)
-        events = list(self._events[capability_id])
-        total = len(events)
+        cutoff = datetime.now(UTC) - _WINDOW
+
+        async with self._session() as session:
+            stmt = (
+                select(OutcomeEventRow)
+                .where(OutcomeEventRow.capability_id == capability_id)
+                .where(OutcomeEventRow.occurred_at >= cutoff)
+                .order_by(OutcomeEventRow.occurred_at)
+            )
+            result = await session.execute(stmt)
+            rows = list(result.scalars().all())
+
+        total = len(rows)
 
         if total == 0:
             return CapabilityStats(
                 capability_id=capability_id,
-                success_rate_7d=1.0,  # Benefit of the doubt with zero data
+                success_rate_7d=1.0,
                 p95_latency_ms=0.0,
                 total_executions_7d=0,
                 last_checked=None,
                 verified=False,
             )
 
-        success_count = sum(1 for e in events if e.success)
+        success_count = sum(1 for r in rows if r.success)
         success_rate = success_count / total
 
-        latencies = sorted(e.latency_ms for e in events)
+        latencies = sorted(r.latency_ms for r in rows)
         p95_latency = _percentile(latencies, 95)
 
-        # A capability is considered "verified" once it has >= 10 executions
-        # with a success rate above the hide threshold.
         verified = total >= 10 and success_rate >= settings.MIN_SUCCESS_RATE_7D
 
-        last_event = max(events, key=lambda e: e.occurred_at)
+        last_event = max(rows, key=lambda r: r.occurred_at)
 
         return CapabilityStats(
             capability_id=capability_id,
@@ -145,12 +152,12 @@ class StatsStore:
             verified=verified,
         )
 
-    def mark_verified(self, capability_id: str) -> None:
-        """Manually mark a capability as verified (e.g. after human review)."""
-        self._last_verified[capability_id] = datetime.now(timezone.utc)
-
-    def all_capability_ids(self) -> list[str]:
-        return list(self._events.keys())
+    async def all_capability_ids(self) -> list[str]:
+        """Return all capability IDs that have recorded events."""
+        async with self._session() as session:
+            stmt = select(distinct(OutcomeEventRow.capability_id))
+            result = await session.execute(stmt)
+            return [row[0] for row in result.all()]
 
 
 def _percentile(sorted_values: list[float], pct: int) -> float:
@@ -169,33 +176,16 @@ def _percentile(sorted_values: list[float], pct: int) -> float:
 
 
 def should_hide(stats: CapabilityStats) -> bool:
-    """Return True if the capability should be hidden from marketplace listings.
-
-    Criteria: success rate below MIN_SUCCESS_RATE_7D for the trailing 7 days,
-    AND there is enough data to make the determination (>= 5 executions).
-
-    Parameters
-    ----------
-    stats:
-        Pre-computed stats from :meth:`StatsStore.get_stats`.
-    """
+    """Return True if the capability should be hidden from marketplace listings."""
     if stats.total_executions_7d < 5:
-        return False  # Not enough data - do not hide prematurely
+        return False
     return stats.success_rate_7d < settings.MIN_SUCCESS_RATE_7D
 
 
 def should_throttle(stats: CapabilityStats) -> bool:
-    """Return True if the capability should be throttled at the gateway.
-
-    Criteria: p95 latency exceeds MAX_P95_LATENCY_MS (default 10,000 ms).
-
-    Parameters
-    ----------
-    stats:
-        Pre-computed stats from :meth:`StatsStore.get_stats`.
-    """
+    """Return True if the capability should be throttled at the gateway."""
     if stats.total_executions_7d < 5:
-        return False  # Not enough data
+        return False
     return stats.p95_latency_ms > settings.MAX_P95_LATENCY_MS
 
 

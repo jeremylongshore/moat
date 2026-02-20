@@ -28,8 +28,18 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     # Trust scoring thresholds
-    MIN_SUCCESS_RATE_7D: float = 0.80   # Below this = should_hide
+    MIN_SUCCESS_RATE_7D: float = 0.80  # Below this = should_hide
     MAX_P95_LATENCY_MS: float = 10_000.0  # Above this = should_throttle
+
+    # Authentication
+    MOAT_JWT_SECRET: str = ""  # Required when auth is enabled
+    MOAT_AUTH_DISABLED: bool = False  # Set True only for local dev
+
+    # Environment
+    MOAT_ENV: str = "local"
+
+    # CORS
+    ALLOWED_ORIGINS: str = "*"
 
     # Server
     HOST: str = "0.0.0.0"

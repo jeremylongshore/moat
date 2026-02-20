@@ -16,59 +16,23 @@ Start with::
 from __future__ import annotations
 
 import logging
-import sys
 import time
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from moat_core.logging import configure_logging
+from moat_core.security_headers import SecurityHeadersMiddleware
 
 from app.config import settings
 from app.routers.events import router as events_router
 from app.routers.stats import router as stats_router
 
-
-# ---------------------------------------------------------------------------
-# Logging
-# ---------------------------------------------------------------------------
-
-def _configure_logging(level: str, service_name: str) -> None:
-    import json
-
-    class _JsonFormatter(logging.Formatter):
-        def format(self, record: logging.LogRecord) -> str:
-            payload = {
-                "level": record.levelname,
-                "logger": record.name,
-                "message": record.getMessage(),
-                "service": service_name,
-                "timestamp": self.formatTime(record),
-            }
-            for key, val in record.__dict__.items():
-                if key not in {
-                    "args", "asctime", "created", "exc_info", "exc_text",
-                    "filename", "funcName", "levelname", "levelno", "lineno",
-                    "message", "module", "msecs", "msg", "name", "pathname",
-                    "process", "processName", "relativeCreated", "stack_info",
-                    "thread", "threadName",
-                }:
-                    payload[key] = val
-            if record.exc_info:
-                payload["exc_info"] = self.formatException(record.exc_info)
-            return json.dumps(payload, default=str)
-
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(_JsonFormatter())
-    root = logging.getLogger()
-    root.setLevel(getattr(logging, level.upper(), logging.INFO))
-    root.handlers = [handler]
-    logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
-
-
-_configure_logging(settings.LOG_LEVEL, settings.SERVICE_NAME)
+# Configure structured JSON logging before anything else writes to the log.
+configure_logging(level=settings.LOG_LEVEL, service_name=settings.SERVICE_NAME)
 logger = logging.getLogger(__name__)
 
 
@@ -76,10 +40,36 @@ logger = logging.getLogger(__name__)
 # Lifespan
 # ---------------------------------------------------------------------------
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    from moat_core.auth import AuthConfig, configure_auth
+    from moat_core.db import create_engine, create_session_factory, init_tables
+
+    from app.scoring import stats_store
+
     logger.info("Trust plane starting", extra={"service": settings.SERVICE_NAME})
+
+    # Configure authentication
+    auth_config = AuthConfig(
+        jwt_secret=settings.MOAT_JWT_SECRET,
+        auth_disabled=settings.MOAT_AUTH_DISABLED,
+    )
+    configure_auth(auth_config, environment=settings.MOAT_ENV)
+
+    # Initialize database
+    engine = create_engine(settings.DATABASE_URL)
+    session_factory = create_session_factory(engine)
+    await init_tables(engine)
+    stats_store.configure(session_factory)
+
+    logger.info(
+        "Trust plane database initialized",
+        extra={"auth_disabled": settings.MOAT_AUTH_DISABLED},
+    )
     yield
+
+    await engine.dispose()
     logger.info("Trust plane shutting down")
 
 
@@ -87,6 +77,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 # Application
 # ---------------------------------------------------------------------------
 
+_expose_docs = settings.MOAT_ENV in ("local", "test", "dev")
 app = FastAPI(
     title="Moat Trust Plane",
     description=(
@@ -94,9 +85,9 @@ app = FastAPI(
         "Verified Agent Capabilities Marketplace."
     ),
     version="0.1.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    docs_url="/docs" if _expose_docs else None,
+    redoc_url="/redoc" if _expose_docs else None,
+    openapi_url="/openapi.json" if _expose_docs else None,
     lifespan=lifespan,
 )
 
@@ -104,13 +95,15 @@ app = FastAPI(
 # Middleware
 # ---------------------------------------------------------------------------
 
+_origins = [o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 @app.middleware("http")
@@ -139,6 +132,7 @@ async def request_id_middleware(request: Request, call_next: object) -> Response
 # ---------------------------------------------------------------------------
 # Exception handlers
 # ---------------------------------------------------------------------------
+
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:

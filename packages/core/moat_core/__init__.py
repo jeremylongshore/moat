@@ -35,9 +35,45 @@ Sub-module summary
 
 :mod:`moat_core.policy`
     :func:`evaluate_policy` – the default-deny policy evaluation engine.
+
+:mod:`moat_core.auth`
+    JWT authentication utilities and FastAPI dependencies.
 """
 
 from __future__ import annotations
+
+# --- Authentication ---------------------------------------------------------
+from moat_core.auth import (
+    AuthConfig,
+    JWTConfig,
+    JWTPayload,
+    configure_auth,
+    create_jwt,
+    decode_jwt,
+    get_current_tenant,
+    get_optional_tenant,
+    require_tenant,
+)
+
+# --- Exceptions -------------------------------------------------------------
+from moat_core.errors import (
+    AdapterError,
+    BudgetExceededError,
+    CapabilityNotFoundError,
+    IdempotencyConflictError,
+    MoatError,
+    PolicyDeniedError,
+)
+
+# --- Idempotency ------------------------------------------------------------
+from moat_core.idempotency import (
+    IdempotencyStore,
+    InMemoryIdempotencyStore,
+    generate_idempotency_key,
+)
+
+# --- Logging ----------------------------------------------------------------
+from moat_core.logging import SENSITIVE_KEYS, JsonFormatter, configure_logging
 
 # --- Models & enumerations --------------------------------------------------
 from moat_core.models import (
@@ -52,15 +88,8 @@ from moat_core.models import (
     RiskClass,
 )
 
-# --- Exceptions -------------------------------------------------------------
-from moat_core.errors import (
-    AdapterError,
-    BudgetExceededError,
-    CapabilityNotFoundError,
-    IdempotencyConflictError,
-    MoatError,
-    PolicyDeniedError,
-)
+# --- Policy engine ----------------------------------------------------------
+from moat_core.policy import evaluate_policy
 
 # --- Redaction & hashing ----------------------------------------------------
 from moat_core.redaction import (
@@ -70,15 +99,8 @@ from moat_core.redaction import (
     redact_headers,
 )
 
-# --- Idempotency ------------------------------------------------------------
-from moat_core.idempotency import (
-    IdempotencyStore,
-    InMemoryIdempotencyStore,
-    generate_idempotency_key,
-)
-
-# --- Policy engine ----------------------------------------------------------
-from moat_core.policy import evaluate_policy
+# --- Security headers -------------------------------------------------------
+from moat_core.security_headers import SecurityHeadersMiddleware
 
 __all__: list[str] = [
     # Models
@@ -109,6 +131,24 @@ __all__: list[str] = [
     "generate_idempotency_key",
     # Policy
     "evaluate_policy",
+    # Database (lazy import via moat_core.db)
+    "db",
+    # Authentication
+    "AuthConfig",
+    "JWTConfig",
+    "JWTPayload",
+    "configure_auth",
+    "create_jwt",
+    "decode_jwt",
+    "get_current_tenant",
+    "get_optional_tenant",
+    "require_tenant",
+    # Logging
+    "configure_logging",
+    "JsonFormatter",
+    "SENSITIVE_KEYS",
+    # Security
+    "SecurityHeadersMiddleware",
 ]
 
 __version__: str = "0.1.0"
