@@ -27,13 +27,18 @@ Setup
            -d '{"name": "slack.post_message", "provider": "slack",
                 "version": "1.0.0", "description": "Post a message to Slack",
                 "input_schema": {"type": "object", "required": ["channel", "text"],
-                    "properties": {"channel": {"type": "string"}, "text": {"type": "string"}}}}'
+                    "properties": {
+                        "channel": {"type": "string"},
+                        "text": {"type": "string"}}}}'
 
 7. Execute it::
 
-       curl -X POST http://localhost:8002/execute/{capability_id} \\
+       curl -X POST \\
+           http://localhost:8002/execute/{capability_id} \\
            -H "Content-Type: application/json" \\
-           -d '{"tenant_id": "your-tenant", "params": {"channel": "#test", "text": "Hello from Moat!"}}'
+           -d '{"tenant_id": "your-tenant",
+                "params": {"channel": "#test",
+                "text": "Hello from Moat!"}}'
 
 Environment Variable Shortcut
 -----------------------------

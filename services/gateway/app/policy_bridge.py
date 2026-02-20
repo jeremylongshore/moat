@@ -51,7 +51,8 @@ def evaluate_policy(
     # TODO Phase 4: Look up PolicyBundle from DB for (tenant_id, capability_id)
     # TODO Phase 4: Calculate current_spend_cents from recent receipts
     # TODO Phase 4: Build CapabilityManifest from capability metadata
-    # TODO Phase 4: Call moat_core.policy.evaluate_policy(bundle, manifest, scope, spend)
+    # TODO Phase 4: Call moat_core.policy.evaluate_policy(
+    #   bundle, manifest, scope, spend)
 
     logger.debug(
         "Policy evaluation (permissive stub)",

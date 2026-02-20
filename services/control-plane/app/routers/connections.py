@@ -44,7 +44,10 @@ class ConnectionCreateRequest(BaseModel):
     )
     credential_reference: str = Field(
         ...,
-        description="Opaque reference to a vault-stored credential. Never the raw secret.",
+        description=(
+            "Opaque reference to a vault-stored credential. "
+            "Never the raw secret."
+        ),
     )
     display_name: str = Field(
         default="", max_length=256, description="Human-readable label"

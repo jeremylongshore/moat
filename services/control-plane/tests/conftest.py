@@ -14,8 +14,9 @@ from typing import Any
 import pytest
 
 # Set test environment before importing app
-_test_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_test_db.name}"
+_test_db_fd, _test_db_path = tempfile.mkstemp(suffix=".db")
+os.close(_test_db_fd)
+os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_test_db_path}"
 os.environ["MOAT_AUTH_DISABLED"] = "true"  # Disable auth for tests
 
 

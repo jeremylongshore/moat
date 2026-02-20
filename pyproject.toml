@@ -67,11 +67,13 @@ skip-magic-trailing-comma = false
 # ─────────────────────────────────────────────────────────────────────────────
 [tool.mypy]
 python_version = "3.11"
+explicit_package_bases = true
 
 # Not full strict mode yet – allow gradual adoption.
 # Flip individual flags on as the codebase matures.
 strict = false
 ignore_missing_imports = true
+exclude = ["tests/"]
 
 # Pydantic v2 plugin for accurate model type inference.
 plugins = ["pydantic.mypy"]
