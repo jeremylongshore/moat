@@ -31,6 +31,16 @@ class Settings(BaseSettings):
     # Observability
     LOG_LEVEL: str = "INFO"
 
+    # Authentication
+    MOAT_JWT_SECRET: str = ""  # Required when auth is enabled
+    MOAT_AUTH_DISABLED: bool = False  # Set True only for local dev
+
+    # Environment
+    MOAT_ENV: str = "local"
+
+    # CORS
+    ALLOWED_ORIGINS: str = "*"
+
     # Server
     HOST: str = "0.0.0.0"
     PORT: int = 8004

@@ -16,7 +16,7 @@ Production upgrade path
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -40,7 +40,7 @@ class CapabilityCache:
         fetched = self._fetched_at.get(capability_id)
         if fetched is None:
             return True
-        return datetime.now(timezone.utc) - fetched > _CACHE_TTL
+        return datetime.now(UTC) - fetched > _CACHE_TTL
 
     def get(self, capability_id: str) -> dict[str, Any] | None:
         if self._is_expired(capability_id):
@@ -49,7 +49,7 @@ class CapabilityCache:
 
     def set(self, capability_id: str, capability: dict[str, Any]) -> None:
         self._cache[capability_id] = capability
-        self._fetched_at[capability_id] = datetime.now(timezone.utc)
+        self._fetched_at[capability_id] = datetime.now(UTC)
 
     def invalidate(self, capability_id: str) -> None:
         self._cache.pop(capability_id, None)
@@ -109,7 +109,7 @@ async def get_capability(capability_id: str) -> dict[str, Any] | None:
             "output_schema": {},
             "status": "active",
             "tags": [],
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
             "_stub": True,
         }
         _cache.set(capability_id, stub)

@@ -6,16 +6,17 @@ Outcome event ingestion endpoint.
 The gateway POSTs an OutcomeEvent here after each capability execution.
 Events drive the rolling reliability statistics in the StatsStore.
 
-This endpoint is an internal service-to-service API. It is not exposed
-to end users or MCP clients.
+This endpoint is an internal service-to-service API.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from typing import Annotated
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Depends, status
+from moat_core.auth import get_current_tenant
 from pydantic import BaseModel, Field
 
 from app.scoring import EventRecord, stats_store
@@ -28,6 +29,7 @@ router = APIRouter(prefix="/events", tags=["events"])
 # ---------------------------------------------------------------------------
 # Request / Response schemas
 # ---------------------------------------------------------------------------
+
 
 class OutcomeEventRequest(BaseModel):
     """Outcome event payload sent by the gateway after each execution."""
@@ -62,35 +64,32 @@ class EventIngestResponse(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.post(
     "",
     response_model=EventIngestResponse,
     status_code=status.HTTP_201_CREATED,
     summary="Ingest an outcome event",
 )
-async def ingest_event(body: OutcomeEventRequest) -> EventIngestResponse:
-    """Accept an execution outcome event from the gateway and update rolling stats.
-
-    **Caller:** ``moat-gateway`` (internal service-to-service call)
-
-    Each event increments the 7-day rolling window for the capability's
-    success rate and latency percentiles. Events older than 7 days are
-    automatically pruned.
-    """
+async def ingest_event(
+    body: OutcomeEventRequest,
+    tenant_id: Annotated[str, Depends(get_current_tenant)],
+) -> EventIngestResponse:
+    """Accept an execution outcome event from the gateway and update rolling stats."""
     occurred_at: datetime
     if body.occurred_at:
         try:
             occurred_at = datetime.fromisoformat(body.occurred_at)
             if occurred_at.tzinfo is None:
-                occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+                occurred_at = occurred_at.replace(tzinfo=UTC)
         except ValueError:
             logger.warning(
                 "Invalid occurred_at format, using current time",
                 extra={"event_id": body.event_id, "occurred_at": body.occurred_at},
             )
-            occurred_at = datetime.now(timezone.utc)
+            occurred_at = datetime.now(UTC)
     else:
-        occurred_at = datetime.now(timezone.utc)
+        occurred_at = datetime.now(UTC)
 
     success = body.execution_status.lower() in ("success", "succeeded", "ok")
 
@@ -103,7 +102,7 @@ async def ingest_event(body: OutcomeEventRequest) -> EventIngestResponse:
         receipt_id=body.receipt_id,
     )
 
-    stats_store.record(event)
+    await stats_store.record(event, event_id=body.event_id)
 
     logger.info(
         "Outcome event ingested",
@@ -128,11 +127,13 @@ async def ingest_event(body: OutcomeEventRequest) -> EventIngestResponse:
     summary="Return total ingested event count across all capabilities",
     tags=["events"],
 )
-async def event_count() -> dict[str, int]:
+async def event_count(
+    tenant_id: Annotated[str, Depends(get_current_tenant)],
+) -> dict[str, int]:
     """Return the total number of events currently in the 7-day rolling window."""
-    total = sum(
-        stats.total_executions_7d
-        for cid in stats_store.all_capability_ids()
-        for stats in [stats_store.get_stats(cid)]
-    )
+    capability_ids = await stats_store.all_capability_ids()
+    total = 0
+    for cid in capability_ids:
+        s = await stats_store.get_stats(cid)
+        total += s.total_executions_7d
     return {"total_events_in_window": total}

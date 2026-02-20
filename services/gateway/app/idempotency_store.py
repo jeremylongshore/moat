@@ -1,78 +1,115 @@
 """
 app.idempotency_store
 ~~~~~~~~~~~~~~~~~~~~~
-In-memory idempotency store for MVP.
+Async DB-backed idempotency store.
 
-Idempotency ensures that if a caller retries a request with the same key,
+Ensures that if a caller retries a request with the same key,
 they receive the same response without re-executing the capability.
 
-Production considerations
--------------------------
-- Replace with Redis-backed store using SETNX + TTL
-- Set expiry (e.g. 24 hours) to prevent unbounded growth
-- Use a distributed lock to prevent concurrent execution of the same key
-- Store payloads in a compressed format (msgpack/orjson) to reduce memory
-
-Format of stored keys: ``"{tenant_id}:{idempotency_key}"``
+Supports TTL-based expiry via the ``expires_at`` column.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
+
+from moat_core.db import IdempotencyCacheRow
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 logger = logging.getLogger(__name__)
 
-# TTL is not enforced in the in-memory implementation.
-# In production (Redis), use EXPIRE.
 _DEFAULT_TTL_SECONDS = 86_400  # 24 hours
 
 
 class IdempotencyStore:
-    """Thread-safe (for asyncio) in-memory idempotency cache."""
+    """Async DB-backed idempotency cache."""
 
     def __init__(self) -> None:
-        # Key: "{tenant_id}:{idempotency_key}"
-        # Value: {"receipt": dict, "stored_at": str}
-        self._store: dict[str, dict[str, Any]] = {}
+        self._session_factory: async_sessionmaker[AsyncSession] | None = None
 
-    def _make_key(self, tenant_id: str, idempotency_key: str) -> str:
-        return f"{tenant_id}:{idempotency_key}"
+    def configure(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._session_factory = session_factory
 
-    def get(self, tenant_id: str, idempotency_key: str) -> dict[str, Any] | None:
+    def _session(self) -> AsyncSession:
+        if self._session_factory is None:
+            raise RuntimeError(
+                "IdempotencyStore not configured. Call configure() during lifespan."
+            )
+        return self._session_factory()
+
+    async def get(self, tenant_id: str, idempotency_key: str) -> dict[str, Any] | None:
         """Return the cached receipt for this idempotency key, or None."""
-        key = self._make_key(tenant_id, idempotency_key)
-        entry = self._store.get(key)
-        if entry:
+        async with self._session() as session:
+            stmt = (
+                select(IdempotencyCacheRow)
+                .where(IdempotencyCacheRow.tenant_id == tenant_id)
+                .where(IdempotencyCacheRow.idempotency_key == idempotency_key)
+            )
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+
+            if row is None:
+                return None
+
+            # Check expiry
+            now = datetime.now(UTC)
+            if row.expires_at.tzinfo is None:
+                # Handle naive datetimes from SQLite
+                expires = row.expires_at.replace(tzinfo=UTC)
+            else:
+                expires = row.expires_at
+
+            if now >= expires:
+                await session.delete(row)
+                await session.commit()
+                return None
+
             logger.debug(
                 "Idempotency cache hit",
-                extra={
-                    "tenant_id": tenant_id,
-                    "idempotency_key": idempotency_key,
-                    "stored_at": entry.get("stored_at"),
-                },
+                extra={"tenant_id": tenant_id, "idempotency_key": idempotency_key},
             )
-        return entry.get("receipt") if entry else None
+            return row.receipt_data
 
-    def set(self, tenant_id: str, idempotency_key: str, receipt: dict[str, Any]) -> None:
-        """Cache the receipt for this idempotency key."""
-        key = self._make_key(tenant_id, idempotency_key)
-        self._store[key] = {
-            "receipt": receipt,
-            "stored_at": datetime.now(timezone.utc).isoformat(),
-        }
-        logger.debug(
-            "Idempotency entry stored",
-            extra={"tenant_id": tenant_id, "idempotency_key": idempotency_key},
-        )
+    async def set(
+        self,
+        tenant_id: str,
+        idempotency_key: str,
+        receipt: dict[str, Any],
+        ttl_seconds: int = _DEFAULT_TTL_SECONDS,
+    ) -> None:
+        """Cache the receipt for this idempotency key with TTL."""
+        now = datetime.now(UTC)
+        expires_at = now + timedelta(seconds=ttl_seconds)
 
-    def exists(self, tenant_id: str, idempotency_key: str) -> bool:
-        key = self._make_key(tenant_id, idempotency_key)
-        return key in self._store
+        async with self._session() as session:
+            # Upsert: delete existing then insert
+            stmt = (
+                select(IdempotencyCacheRow)
+                .where(IdempotencyCacheRow.tenant_id == tenant_id)
+                .where(IdempotencyCacheRow.idempotency_key == idempotency_key)
+            )
+            result = await session.execute(stmt)
+            existing = result.scalar_one_or_none()
+            if existing:
+                await session.delete(existing)
 
-    def __len__(self) -> int:
-        return len(self._store)
+            row = IdempotencyCacheRow(
+                tenant_id=tenant_id,
+                idempotency_key=idempotency_key,
+                receipt_data=receipt,
+                stored_at=now,
+                expires_at=expires_at,
+            )
+            session.add(row)
+            await session.commit()
+
+            logger.debug(
+                "Idempotency entry stored",
+                extra={"tenant_id": tenant_id, "idempotency_key": idempotency_key},
+            )
 
 
 # Module-level singleton

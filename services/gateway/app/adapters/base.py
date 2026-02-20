@@ -91,9 +91,14 @@ class AdapterRegistry:
         """
         name = adapter.provider_name
         if name in self._adapters:
-            logger.warning("Replacing existing adapter for provider", extra={"provider": name})
+            logger.warning(
+                "Replacing existing adapter for provider", extra={"provider": name}
+            )
         self._adapters[name] = adapter
-        logger.info("Adapter registered", extra={"provider": name, "adapter": type(adapter).__name__})
+        logger.info(
+            "Adapter registered",
+            extra={"provider": name, "adapter": type(adapter).__name__},
+        )
 
     def get(self, provider: str) -> AdapterInterface | None:
         """Return the adapter for ``provider``, or None if not registered."""

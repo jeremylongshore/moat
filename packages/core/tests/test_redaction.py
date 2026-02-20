@@ -14,7 +14,6 @@ import pytest
 
 from moat_core import REDACT_KEYS, hash_redacted, redact_body, redact_headers
 
-
 _SENTINEL = "[REDACTED]"
 
 
@@ -107,9 +106,7 @@ class TestRedactBody:
         assert result["items"][1]["name"] == "item"
 
     def test_deeply_nested(self) -> None:
-        result = redact_body(
-            {"a": {"b": {"c": {"password": "deep"}}}}
-        )
+        result = redact_body({"a": {"b": {"c": {"password": "deep"}}}})
         assert result["a"]["b"]["c"]["password"] == _SENTINEL
 
     def test_custom_denylist_extends_defaults(self) -> None:
@@ -182,7 +179,9 @@ class TestHashRedacted:
         # Redacted: password is not present, so no redaction needed here
         redacted = redact_body(data)
         expected = hashlib.sha256(
-            json.dumps(redacted, sort_keys=True, separators=(",", ":"), default=str).encode()
+            json.dumps(
+                redacted, sort_keys=True, separators=(",", ":"), default=str
+            ).encode()
         ).hexdigest()
         assert hash_redacted(data) == expected
 
@@ -196,9 +195,7 @@ class TestHashRedacted:
 
     def test_custom_denylist_applied(self) -> None:
         h_no_custom = hash_redacted({"field": "val"})
-        h_with_custom = hash_redacted(
-            {"field": "val"}, denylist=frozenset({"field"})
-        )
+        h_with_custom = hash_redacted({"field": "val"}, denylist=frozenset({"field"}))
         # With custom denylist, "field" is redacted → [REDACTED]
         # so the hashes differ
         assert h_no_custom != h_with_custom

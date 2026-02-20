@@ -25,11 +25,10 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Protocol, runtime_checkable
 
 from moat_core.models import Receipt
-
 
 # ---------------------------------------------------------------------------
 # Key generation
@@ -172,7 +171,7 @@ class InMemoryIdempotencyStore:
             entry = self._store.get(key)
             if entry is None:
                 return None
-            now = datetime.now(tz=timezone.utc)
+            now = datetime.now(tz=UTC)
             if now >= entry.expiry_at:
                 del self._store[key]
                 return None
@@ -185,7 +184,7 @@ class InMemoryIdempotencyStore:
         ttl_seconds: int = 86_400,
     ) -> None:
         """Store *receipt* under *key*, expiring after *ttl_seconds*."""
-        expiry_at = datetime.now(tz=timezone.utc) + timedelta(seconds=ttl_seconds)
+        expiry_at = datetime.now(tz=UTC) + timedelta(seconds=ttl_seconds)
         async with self._lock:
             self._store[key] = _Entry(receipt=receipt, expiry_at=expiry_at)
 

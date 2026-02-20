@@ -123,7 +123,7 @@ format-check:
 # ─────────────────────────────────────────────────────────────────────────────
 typecheck:
 	@printf "$(BOLD)Running mypy...$(RESET)\n"
-	mypy packages/ services/ || true
+	mypy packages/ services/
 
 # ─────────────────────────────────────────────────────────────────────────────
 # test

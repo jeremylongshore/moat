@@ -19,15 +19,16 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from moat_core.logging import configure_logging
+from moat_core.security_headers import SecurityHeadersMiddleware
 
 from app.config import settings
-from app.logging_config import configure_logging
 from app.routers.capabilities import router as capability_router
 from app.routers.connections import router as connection_router
 
@@ -41,13 +42,45 @@ logger = logging.getLogger(__name__)
 # Lifespan
 # ---------------------------------------------------------------------------
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    from moat_core.auth import AuthConfig, configure_auth
+    from moat_core.db import create_engine, create_session_factory, init_tables
+
+    from app.store import capability_store, connection_store
+
     logger.info(
         "Control plane starting",
-        extra={"service": settings.SERVICE_NAME, "version": "0.1.0"},
+        extra={
+            "service": settings.SERVICE_NAME,
+            "version": "0.1.0",
+            "database_url": settings.DATABASE_URL.split("@")[-1],
+        },
+    )
+
+    # Configure authentication
+    auth_config = AuthConfig(
+        jwt_secret=settings.MOAT_JWT_SECRET,
+        auth_disabled=settings.MOAT_AUTH_DISABLED,
+    )
+    configure_auth(auth_config, environment=settings.MOAT_ENV)
+
+    # Initialize database
+    engine = create_engine(settings.DATABASE_URL)
+    session_factory = create_session_factory(engine)
+    await init_tables(engine)
+
+    # Wire stores
+    capability_store.configure(session_factory)
+    connection_store.configure(session_factory)
+
+    logger.info(
+        "Database initialized", extra={"auth_disabled": settings.MOAT_AUTH_DISABLED}
     )
     yield
+
+    await engine.dispose()
     logger.info("Control plane shutting down")
 
 
@@ -55,6 +88,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 # Application
 # ---------------------------------------------------------------------------
 
+_expose_docs = settings.MOAT_ENV in ("local", "test", "dev")
 app = FastAPI(
     title="Moat Control Plane",
     description=(
@@ -62,9 +96,9 @@ app = FastAPI(
         "Verified Agent Capabilities Marketplace."
     ),
     version="0.1.0",
-    docs_url="/docs",
-    redoc_url="/redoc",
-    openapi_url="/openapi.json",
+    docs_url="/docs" if _expose_docs else None,
+    redoc_url="/redoc" if _expose_docs else None,
+    openapi_url="/openapi.json" if _expose_docs else None,
     lifespan=lifespan,
 )
 
@@ -72,13 +106,15 @@ app = FastAPI(
 # Middleware
 # ---------------------------------------------------------------------------
 
+_origins = [o.strip() for o in settings.ALLOWED_ORIGINS.split(",") if o.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # Tighten for production (specific domains only)
+    allow_origins=_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 @app.middleware("http")
@@ -109,6 +145,7 @@ async def request_id_middleware(request: Request, call_next: object) -> Response
 # ---------------------------------------------------------------------------
 # Exception handlers
 # ---------------------------------------------------------------------------
+
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:

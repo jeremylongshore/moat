@@ -18,7 +18,6 @@ from moat_core import (
 )
 from moat_core.models import CapabilityStatus
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -165,9 +164,7 @@ class TestBudgetDailyExceeded:
         assert "1500" in decision.rule_hit
         assert "1000" in decision.rule_hit
 
-    def test_no_budget_set_means_unlimited(
-        self, manifest: CapabilityManifest
-    ) -> None:
+    def test_no_budget_set_means_unlimited(self, manifest: CapabilityManifest) -> None:
         bundle = PolicyBundle(
             id="b",
             tenant_id="t",
@@ -178,9 +175,7 @@ class TestBudgetDailyExceeded:
         decision = evaluate_policy(bundle, manifest, "search:read", 999_999_999)
         assert decision.allowed is True
 
-    def test_zero_budget_denies_any_spend(
-        self, manifest: CapabilityManifest
-    ) -> None:
+    def test_zero_budget_denies_any_spend(self, manifest: CapabilityManifest) -> None:
         bundle = PolicyBundle(
             id="b",
             tenant_id="t",
@@ -334,9 +329,7 @@ class TestDefaultDeny:
 
 
 class TestRulePriority:
-    def test_scope_checked_before_budget(
-        self, manifest: CapabilityManifest
-    ) -> None:
+    def test_scope_checked_before_budget(self, manifest: CapabilityManifest) -> None:
         """Scope denial takes precedence over budget denial."""
         bundle = PolicyBundle(
             id="b",
