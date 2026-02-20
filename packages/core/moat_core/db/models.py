@@ -42,6 +42,9 @@ class CapabilityRow(Base):
     output_schema: Mapped[dict] = mapped_column(JSON, default=dict)
     status: Mapped[str] = mapped_column(String(16), default="active", index=True)
     tags: Mapped[list] = mapped_column(JSON, default=list)
+    owner_tenant_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(UTC)
     )
@@ -57,6 +60,7 @@ class CapabilityRow(Base):
             "output_schema": self.output_schema or {},
             "status": self.status,
             "tags": self.tags or [],
+            "owner_tenant_id": self.owner_tenant_id,
             "created_at": self.created_at.isoformat() if self.created_at else "",
         }
 

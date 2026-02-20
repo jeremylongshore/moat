@@ -13,6 +13,7 @@ Auth can be disabled via MOAT_AUTH_DISABLED=true for local development.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -222,9 +223,24 @@ def require_tenant(tenant_id_param: str = "tenant_id"):
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-        # For JSON body validation, we need to read the body
-        # This is called after request parsing, so body is available
-        # FastAPI will have already parsed it if using Pydantic model
+        # Verify tenant_id in request body matches JWT
+        try:
+            raw = await request.body()
+            if raw:
+                body = json.loads(raw)
+                body_tenant = body.get(tenant_id_param)
+                if body_tenant and body_tenant != payload.tenant_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=(
+                            "Tenant ID in request body does not "
+                            "match authenticated tenant"
+                        ),
+                    )
+        except (json.JSONDecodeError, AttributeError):
+            # Let FastAPI's own validation handle malformed bodies
+            pass
+
         return payload.tenant_id
 
     return _verify_tenant

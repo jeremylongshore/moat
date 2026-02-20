@@ -79,6 +79,7 @@ class CapabilityResponse(BaseModel):
     output_schema: dict[str, Any]
     status: str
     tags: list[str]
+    owner_tenant_id: str | None = None
     created_at: str
 
 
@@ -107,6 +108,7 @@ async def create_capability(
     Returns the created capability with its server-assigned ``capability_id``.
     """
     data = body.model_dump()
+    data["owner_tenant_id"] = tenant_id
     record = await capability_store.create(data)
     logger.info(
         "Capability registered",
@@ -114,6 +116,7 @@ async def create_capability(
             "capability_id": record.capability_id,
             "provider": record.provider,
             "capability_name": record.name,
+            "owner_tenant_id": tenant_id,
         },
     )
     return CapabilityResponse(**record.to_dict())
@@ -165,6 +168,19 @@ async def update_capability_status(
     tenant_id: Annotated[str, Depends(get_current_tenant)],
 ) -> CapabilityResponse:
     """Change a capability's lifecycle status."""
+    # Verify capability exists and caller owns it
+    existing = await capability_store.get(capability_id)
+    if existing is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Capability '{capability_id}' not found",
+        )
+    if existing.owner_tenant_id and existing.owner_tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to modify this capability",
+        )
+
     record = await capability_store.update_status(capability_id, new_status)
     if record is None:
         raise HTTPException(
@@ -173,6 +189,10 @@ async def update_capability_status(
         )
     logger.info(
         "Capability status updated",
-        extra={"capability_id": capability_id, "new_status": new_status},
+        extra={
+            "capability_id": capability_id,
+            "new_status": new_status,
+            "tenant_id": tenant_id,
+        },
     )
     return CapabilityResponse(**record.to_dict())

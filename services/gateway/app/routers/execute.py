@@ -25,7 +25,7 @@ from datetime import UTC, datetime
 from typing import Annotated, Any
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from moat_core.auth import get_current_tenant
 from pydantic import BaseModel, Field
 
@@ -178,6 +178,7 @@ async def execute_capability(
     capability_id: str,
     body: ExecuteRequest,
     request: Request,
+    background_tasks: BackgroundTasks,
     auth_tenant_id: Annotated[str, Depends(get_current_tenant)],
 ) -> ReceiptResponse:
     """Execute a capability through the full Moat pipeline.
@@ -350,9 +351,7 @@ async def execute_capability(
     # ------------------------------------------------------------------
     # Step 8: Emit outcome event to trust plane (best-effort)
     # ------------------------------------------------------------------
-    import asyncio  # noqa: PLC0415 - local import to keep module clean
-
-    asyncio.ensure_future(_emit_outcome_event(receipt))
+    background_tasks.add_task(_emit_outcome_event, receipt)
 
     # ------------------------------------------------------------------
     # Step 9: Store in idempotency cache (only for successful executions)

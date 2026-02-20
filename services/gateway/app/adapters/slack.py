@@ -53,6 +53,7 @@ import os
 from typing import Any
 
 import httpx
+from moat_core.redaction import hash_redacted
 
 from app.adapters.base import AdapterInterface
 
@@ -60,6 +61,18 @@ logger = logging.getLogger(__name__)
 
 _SLACK_API_BASE = "https://slack.com/api"
 _TIMEOUT_SECONDS = 10.0
+
+# Persistent HTTP client — reused across requests instead of
+# creating a new client per call.  Lazily initialised on first use.
+_http_client: httpx.AsyncClient | None = None
+
+
+def _get_http_client() -> httpx.AsyncClient:
+    """Return the shared httpx client, creating it on first call."""
+    global _http_client  # noqa: PLW0603
+    if _http_client is None:
+        _http_client = httpx.AsyncClient(timeout=_TIMEOUT_SECONDS)
+    return _http_client
 
 
 class SlackAdapter(AdapterInterface):
@@ -140,15 +153,15 @@ class SlackAdapter(AdapterInterface):
             },
         )
 
-        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS) as client:
-            response = await client.post(
-                f"{_SLACK_API_BASE}/chat.postMessage",
-                headers={
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json; charset=utf-8",
-                },
-                json=payload,
-            )
+        client = _get_http_client()
+        response = await client.post(
+            f"{_SLACK_API_BASE}/chat.postMessage",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+            json=payload,
+        )
 
         if response.status_code != 200:
             raise RuntimeError(
@@ -164,7 +177,8 @@ class SlackAdapter(AdapterInterface):
             "ok": True,
             "channel": data.get("channel", channel),
             "ts": data.get("ts", ""),
-            "message_text": text[:100],  # Truncated for receipt (no secrets)
+            # SHA-256 hash — no raw content in receipt
+            "message_text_hash": hash_redacted(text),
         }
 
         logger.info(
