@@ -30,7 +30,9 @@ from moat_core.auth import get_current_tenant
 from pydantic import BaseModel, Field
 
 from app.adapters.base import registry as adapter_registry
+from app.adapters.http_proxy import HttpProxyAdapter
 from app.adapters.local_cli import LocalCLIAdapter
+from app.adapters.openai_proxy import OpenAIAdapter
 from app.adapters.slack import SlackAdapter
 from app.adapters.stub import StubAdapter
 from app.capability_cache import get_capability
@@ -43,6 +45,8 @@ from app.policy_bridge import evaluate_policy, record_spend
 adapter_registry.register(StubAdapter())
 adapter_registry.register(SlackAdapter())
 adapter_registry.register(LocalCLIAdapter())
+adapter_registry.register(OpenAIAdapter())
+adapter_registry.register(HttpProxyAdapter())
 
 logger = logging.getLogger(__name__)
 

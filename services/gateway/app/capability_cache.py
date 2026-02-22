@@ -80,10 +80,27 @@ async def get_capability(capability_id: str) -> dict[str, Any] | None:
 
     try:
         async with httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT) as client:
+            # Try by ID first (UUID)
             response = await client.get(
                 f"{settings.CONTROL_PLANE_URL}/capabilities/{capability_id}"
             )
             if response.status_code == 404:
+                # Fall back to name-based search (e.g. "openai.inference")
+                list_resp = await client.get(
+                    f"{settings.CONTROL_PLANE_URL}/capabilities"
+                )
+                if list_resp.status_code == 200:
+                    data = list_resp.json()
+                    # Control plane returns {"items": [...], "total": N}
+                    items = data.get("items", []) if isinstance(data, dict) else data
+                    for cap in items:
+                        if isinstance(cap, dict) and cap.get("name") == capability_id:
+                            _cache.set(capability_id, cap)
+                            logger.debug(
+                                "Capability found by name",
+                                extra={"capability_id": capability_id, "name": cap.get("name")},
+                            )
+                            return cap
                 return None
             response.raise_for_status()
             capability = response.json()
