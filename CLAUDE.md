@@ -60,13 +60,15 @@ services/
 
 1. Fetch capability from control-plane (cached 5min via `capability_cache`)
 2. Validate capability status is `active`
-3. Evaluate policy via `policy_bridge` (shim around `moat_core.policy.evaluate_policy`; falls back to permissive stub if core not installed; fails closed on errors)
+3. Evaluate policy via `policy_bridge` (wires real `moat_core.policy.evaluate_policy`; default-deny if no PolicyBundle registered; fails closed on errors)
 4. Check idempotency key — return cached receipt if seen before
 5. Dispatch to provider adapter (`AdapterRegistry` in `app.adapters.base`; falls back to `StubAdapter`)
 6. Build Receipt
 7. Emit OutcomeEvent to trust-plane (async, best-effort)
 8. Store in idempotency cache (success only)
 9. Return Receipt
+10. (Background) Post IRSB receipt via `hooks/irsb_receipt.py` (dry-run mode)
+11. (Background) Record spend for budget tracking via `policy_bridge.record_spend()`
 
 ### Key domain models (`moat_core.models`)
 
@@ -89,7 +91,27 @@ Priority-ordered, first failure short-circuits:
 
 ### Adapter pattern
 
-New providers implement `AdapterInterface` (ABC in `services/gateway/app/adapters/base.py`) and register with the module-level `AdapterRegistry` singleton. MVP uses `StubAdapter`.
+New providers implement `AdapterInterface` (ABC in `services/gateway/app/adapters/base.py`) and register with the module-level `AdapterRegistry` singleton.
+
+Registered adapters:
+- **StubAdapter** — development/testing, returns mock responses
+- **SlackAdapter** — Slack message delivery
+- **LocalCLIAdapter** — local CLI execution for GWI commands (`services/gateway/app/adapters/local_cli.py`). Uses `asyncio.create_subprocess_exec()` (no shell), pre-defined command templates, GitHub URL validation, 1MB output limit, credential injection via env vars.
+
+### IRSB receipt hook
+
+Post-execution hook at `services/gateway/app/hooks/irsb_receipt.py` fires as a background task after every successful gateway execution. Currently **dry-run** (`DRY_RUN = True`) — logs receipt data but doesn't post on-chain. When wired:
+- Computes placeholder intentHash (SHA-256, not real CIE yet)
+- Computes resultHash from execution output
+- Posts to IntentReceiptHub at `0xD66A1e880AA3939CA066a9EA1dD37ad3d01D977c` on Sepolia
+
+### Policy bridge (rewritten)
+
+`services/gateway/app/policy_bridge.py` was rewritten from a permissive stub to wire the real `moat_core.policy.evaluate_policy()` engine. Includes:
+- In-memory PolicyBundle registry (`register_policy_bundle()` / `_get_bundle()`)
+- In-memory daily spend tracking (`record_spend()` / `_get_current_spend()`)
+- Capability dict → CapabilityManifest conversion
+- Falls back to deny if no bundle registered (default-deny)
 
 ## Monorepo layout
 
@@ -97,6 +119,7 @@ New providers implement `AdapterInterface` (ABC in `services/gateway/app/adapter
 - Root `pyproject.toml` configures shared ruff/mypy/pytest settings (line-length 120 at root)
 - Services depend on `moat-core` as a pip dependency (installed editable via `-e packages/core`)
 - `infra/local/` — docker-compose, `.env.example` with Postgres, Redis, service URLs
+- intent-scout-001 integration: `/home/jeremy/000-projects/99-forked/automaton/docker-compose.yml` runs Moat as part of the agent security stack (6 containers)
 - `000-docs/` — design docs using doc-filing system (NNN-CC-ABCD format)
 - `scripts/dev.sh` — starts all 4 uvicorn processes with `--reload`
 - `scripts/demo.sh` — registers a capability, executes it, fetches stats

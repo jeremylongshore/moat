@@ -37,6 +37,84 @@ configure_logging(level=settings.LOG_LEVEL, service_name=settings.SERVICE_NAME)
 logger = logging.getLogger(__name__)
 
 
+def _seed_policy_bundles() -> None:
+    """Register default PolicyBundles for the intent-scout-001 tenant.
+
+    These define which capabilities the agent is allowed to invoke and
+    the daily budget for each. Called once at gateway startup.
+    """
+    from moat_core.models import PolicyBundle
+
+    from app.policy_bridge import register_policy_bundle
+
+    tenant = "automaton"
+
+    bundles = [
+        # GWI code services (local CLI execution)
+        PolicyBundle(
+            id="pb_automaton_gwi_triage",
+            tenant_id=tenant,
+            capability_id="gwi.triage",
+            allowed_scopes=["execute"],
+            budget_daily=5000,  # $50/day (50 calls)
+        ),
+        PolicyBundle(
+            id="pb_automaton_gwi_review",
+            tenant_id=tenant,
+            capability_id="gwi.review",
+            allowed_scopes=["execute"],
+            budget_daily=2000,  # $20/day (20 calls)
+        ),
+        PolicyBundle(
+            id="pb_automaton_gwi_issue_to_code",
+            tenant_id=tenant,
+            capability_id="gwi.issue-to-code",
+            allowed_scopes=["execute"],
+            budget_daily=1000,  # $10/day (10 calls)
+        ),
+        PolicyBundle(
+            id="pb_automaton_gwi_resolve",
+            tenant_id=tenant,
+            capability_id="gwi.resolve",
+            allowed_scopes=["execute"],
+            budget_daily=1000,  # $10/day (10 calls)
+        ),
+        # External API services (proxied through Moat)
+        PolicyBundle(
+            id="pb_automaton_github_api",
+            tenant_id=tenant,
+            capability_id="github.api",
+            allowed_scopes=["execute"],
+            budget_daily=10000,  # $100/day (100 calls)
+            domain_allowlist=["api.github.com"],
+        ),
+        PolicyBundle(
+            id="pb_automaton_openai_inference",
+            tenant_id=tenant,
+            capability_id="openai.inference",
+            allowed_scopes=["execute"],
+            budget_daily=20000,  # $200/day (200 calls)
+            domain_allowlist=["api.openai.com"],
+        ),
+        PolicyBundle(
+            id="pb_automaton_irsb_receipt",
+            tenant_id=tenant,
+            capability_id="irsb.receipt",
+            allowed_scopes=["execute"],
+            budget_daily=5000,  # $50/day (50 calls)
+            domain_allowlist=["sepolia.infura.io"],
+        ),
+    ]
+
+    for bundle in bundles:
+        register_policy_bundle(bundle)
+
+    logger.info(
+        "Seeded PolicyBundles",
+        extra={"count": len(bundles), "tenant": tenant},
+    )
+
+
 # ---------------------------------------------------------------------------
 # Lifespan
 # ---------------------------------------------------------------------------
@@ -75,6 +153,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         "Gateway database initialized",
         extra={"auth_disabled": settings.MOAT_AUTH_DISABLED},
     )
+
+    # Seed PolicyBundles for known capabilities (intent-scout-001 tenant)
+    _seed_policy_bundles()
+
     yield
 
     await engine.dispose()

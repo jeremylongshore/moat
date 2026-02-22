@@ -30,16 +30,19 @@ from moat_core.auth import get_current_tenant
 from pydantic import BaseModel, Field
 
 from app.adapters.base import registry as adapter_registry
+from app.adapters.local_cli import LocalCLIAdapter
 from app.adapters.slack import SlackAdapter
 from app.adapters.stub import StubAdapter
 from app.capability_cache import get_capability
 from app.config import settings
+from app.hooks.irsb_receipt import post_irsb_receipt
 from app.idempotency_store import idempotency_store
-from app.policy_bridge import evaluate_policy
+from app.policy_bridge import evaluate_policy, record_spend
 
-# Register adapters — stub for dev fallback, slack for real provider
+# Register adapters — stub for dev fallback, real providers for production
 adapter_registry.register(StubAdapter())
 adapter_registry.register(SlackAdapter())
+adapter_registry.register(LocalCLIAdapter())
 
 logger = logging.getLogger(__name__)
 
@@ -246,6 +249,8 @@ async def execute_capability(
         tenant_id=body.tenant_id,
         scope=body.scope,
         params=body.params,
+        capability_dict=capability,
+        request_id=request_id,
     )
 
     if not policy_result.allowed:
@@ -354,10 +359,19 @@ async def execute_capability(
     background_tasks.add_task(_emit_outcome_event, receipt)
 
     # ------------------------------------------------------------------
+    # Step 8b: Post IRSB receipt on-chain (best-effort, non-blocking)
+    # ------------------------------------------------------------------
+    background_tasks.add_task(post_irsb_receipt, receipt)
+
+    # ------------------------------------------------------------------
     # Step 9: Store in idempotency cache (only for successful executions)
     # ------------------------------------------------------------------
     if body.idempotency_key and exec_status == "success":
         await idempotency_store.set(body.tenant_id, body.idempotency_key, receipt)
+
+    # Track spend for budget enforcement (1 cent per call for now)
+    if exec_status == "success":
+        record_spend(body.tenant_id, 1)
 
     # ------------------------------------------------------------------
     # Step 10: Return receipt

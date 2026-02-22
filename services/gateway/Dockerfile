@@ -22,7 +22,7 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 COPY packages/core /tmp/core
-RUN pip install --no-cache-dir /tmp/core
+RUN pip install --no-cache-dir "/tmp/core[postgres]"
 
 COPY services/gateway /tmp/service
 RUN pip install --no-cache-dir /tmp/service
