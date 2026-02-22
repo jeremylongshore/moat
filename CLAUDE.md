@@ -97,6 +97,8 @@ Registered adapters:
 - **StubAdapter** — development/testing, returns mock responses
 - **SlackAdapter** — Slack message delivery
 - **LocalCLIAdapter** — local CLI execution for GWI commands (`services/gateway/app/adapters/local_cli.py`). Uses `asyncio.create_subprocess_exec()` (no shell), pre-defined command templates, GitHub URL validation, 1MB output limit, credential injection via env vars.
+- **HttpProxyAdapter** — generic HTTPS proxy for sandboxed agents (`services/gateway/app/adapters/http_proxy.py`). Enforces domain allowlist from `HTTP_PROXY_DOMAIN_ALLOWLIST` env var (comma-separated). Agents POST to `/execute/http.proxy` with `{url, method, headers, body}` — adapter validates the domain, forwards the request, and returns the response.
+- **OpenAIProxyAdapter** — OpenAI API proxy (`services/gateway/app/adapters/openai_proxy.py`). Injects API key server-side so agents never see credentials.
 
 ### IRSB receipt hook
 
@@ -125,6 +127,20 @@ Post-execution hook at `services/gateway/app/hooks/irsb_receipt.py` fires as a b
 - `000-docs/` — design docs using doc-filing system (NNN-CC-ABCD format)
 - `scripts/dev.sh` — starts all 4 uvicorn processes with `--reload`
 - `scripts/demo.sh` — registers a capability, executes it, fetches stats
+
+## HTTP Proxy Capability
+
+The `http.proxy` capability enables sandboxed agents to make outbound HTTP requests through Moat with domain enforcement.
+
+**PolicyBundle** registered in `services/gateway/app/main.py`:
+- Scopes: `["http.get", "http.post"]`
+- Domain allowlist: loaded from `HTTP_PROXY_DOMAIN_ALLOWLIST` env var
+- Budget: $10/day
+- No approval required (fire-and-forget for GET/POST)
+
+**Env var**: `HTTP_PROXY_DOMAIN_ALLOWLIST` — comma-separated list of allowed domains (e.g., `api.github.com,api.algora.io,gitcoin.co`). Requests to unlisted domains are denied by the policy engine.
+
+**Usage from agent**: `POST /execute/http.proxy` with body `{"url": "https://api.github.com/...", "method": "GET"}`. Header `X-Tenant-ID: automaton` required when auth is disabled.
 
 ## Conventions
 
