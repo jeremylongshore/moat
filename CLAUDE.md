@@ -67,7 +67,7 @@ services/
 7. Emit OutcomeEvent to trust-plane (async, best-effort)
 8. Store in idempotency cache (success only)
 9. Return Receipt
-10. (Background) Post IRSB receipt via `hooks/irsb_receipt.py` (dry-run mode)
+10. (Background) Post IRSB receipt via `hooks/irsb_receipt.py` (dry-run by default; set `IRSB_DRY_RUN=false` for on-chain)
 11. (Background) Record spend for budget tracking via `policy_bridge.record_spend()`
 
 ### Key domain models (`moat_core.models`)
@@ -100,10 +100,12 @@ Registered adapters:
 
 ### IRSB receipt hook
 
-Post-execution hook at `services/gateway/app/hooks/irsb_receipt.py` fires as a background task after every successful gateway execution. Currently **dry-run** (`DRY_RUN = True`) — logs receipt data but doesn't post on-chain. When wired:
-- Computes placeholder intentHash (SHA-256, not real CIE yet)
-- Computes resultHash from execution output
-- Posts to IntentReceiptHub at `0xD66A1e880AA3939CA066a9EA1dD37ad3d01D977c` on Sepolia
+Post-execution hook at `services/gateway/app/hooks/irsb_receipt.py` fires as a background task after every successful gateway execution. Default **dry-run** (`IRSB_DRY_RUN=true`) — set `IRSB_DRY_RUN=false` to enable on-chain submission. Full implementation includes:
+- 5-hash computation: intent, result, constraints, route, evidence (all keccak256)
+- ABI-encoded message hash over 11 fields (chain_id, agent address, nonce, 5 hashes, timestamps, solver_id)
+- EIP-191 signing with `eth_account`
+- On-chain submission to IntentReceiptHub at `0xD66A1e880AA3939CA066a9EA1dD37ad3d01D977c` on Sepolia via `web3.py`
+- Fallback chain: `dry_run` → `dry_run_no_rpc` → `dry_run_no_key`
 
 ### Policy bridge (rewritten)
 
@@ -119,7 +121,7 @@ Post-execution hook at `services/gateway/app/hooks/irsb_receipt.py` fires as a b
 - Root `pyproject.toml` configures shared ruff/mypy/pytest settings (line-length 120 at root)
 - Services depend on `moat-core` as a pip dependency (installed editable via `-e packages/core`)
 - `infra/local/` — docker-compose, `.env.example` with Postgres, Redis, service URLs
-- intent-scout-001 integration: `/home/jeremy/000-projects/99-forked/automaton/docker-compose.yml` runs Moat as part of the agent security stack (6 containers)
+- intent-scout-001 integration: `/home/jeremy/000-projects/99-forked/intent-scout/docker-compose.yml` runs Moat as part of the agent security stack (6 containers)
 - `000-docs/` — design docs using doc-filing system (NNN-CC-ABCD format)
 - `scripts/dev.sh` — starts all 4 uvicorn processes with `--reload`
 - `scripts/demo.sh` — registers a capability, executes it, fetches stats
@@ -134,3 +136,22 @@ Post-execution hook at `services/gateway/app/hooks/irsb_receipt.py` fires as a b
 - **Test markers**: `@pytest.mark.unit`, `@pytest.mark.integration`, `@pytest.mark.slow`, `@pytest.mark.docker`
 - **asyncio**: `asyncio_mode = "auto"` — async tests don't need decorators.
 - **License**: Elastic License 2.0
+
+## Test Coverage
+
+| File | Tests | Coverage |
+|------|-------|---------|
+| `services/gateway/tests/test_execute.py` | Execute pipeline happy path, errors, health check |
+| `services/gateway/tests/test_policy_bridge.py` | 55 tests: default-deny, budget enforcement, scope denial, bundle registry, spend tracking |
+| `services/gateway/tests/test_irsb_receipt.py` | 62 tests: 5-hash computation, EIP-191 signing, dry-run mode, on-chain submission mock |
+| `packages/core/tests/` | Policy engine, models, redaction |
+
+## CI/CD
+
+GitHub Actions (`.github/workflows/ci.yml`) — 7 jobs:
+- **lint** (ruff check + format)
+- **typecheck** (mypy, continue-on-error)
+- **test** (pytest + coverage, needs lint)
+- **security** (pip-audit, needs test)
+- **docker** (3x matrix: gateway, control-plane, trust-plane — BuildKit cache)
+- **integration** (Docker Compose end-to-end, main-only: health checks, execute pipeline, policy default-deny)
