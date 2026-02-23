@@ -8,18 +8,18 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
+
+import pytest
 
 # Ensure control-plane service root is on sys.path so 'from app.xxx'
 # resolves to this service's app package (not another service's).
 _service_root = str(Path(__file__).resolve().parent.parent)
 if _service_root not in sys.path:
     sys.path.insert(0, _service_root)
-import tempfile
-from collections.abc import Iterator
-from typing import Any
-
-import pytest
 
 # Set test environment before importing app
 _test_db_fd, _test_db_path = tempfile.mkstemp(suffix=".db")
