@@ -88,8 +88,18 @@ def test_client(
 ) -> Iterator[Any]:
     """Create a TestClient with mocked upstream services."""
     from fastapi.testclient import TestClient
+    from moat_core.models import PolicyBundle
 
     from app.main import app
+    from app.policy_bridge import register_policy_bundle
+
+    test_bundle = PolicyBundle(
+        tenant_id="dev-tenant",
+        capability_id="test-cap-123",
+        allowed_scopes=["execute"],
+        budget_daily=100_000,
+    )
+    register_policy_bundle(test_bundle)
 
     with TestClient(app) as client:
         yield client
