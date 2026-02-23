@@ -94,6 +94,7 @@ def test_client(
     from app.policy_bridge import register_policy_bundle
 
     test_bundle = PolicyBundle(
+        id="test-bundle-dev",
         tenant_id="dev-tenant",
         capability_id="test-cap-123",
         allowed_scopes=["execute"],
