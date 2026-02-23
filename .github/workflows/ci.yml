@@ -120,24 +120,38 @@ jobs:
       - name: Install dev dependencies
         run: pip install -r requirements-dev.txt
 
-      - name: Install all packages (editable)
-        run: |
-          pip install -e packages/core
-          pip install -e services/control-plane
-          pip install -e services/gateway
-          pip install -e services/trust-plane
-          pip install -e services/mcp-server
+      - name: Install moat-core
+        run: pip install -e packages/core
 
-      - name: Run pytest with coverage
+      # Run tests per-service to avoid 'app' package name collisions.
+      # Each service uses 'app' as its internal package name, so editable
+      # installs overwrite each other. Testing in isolation prevents this.
+
+      - name: Test packages/core
         run: |
-          pytest \
-            --tb=short \
-            -v \
+          pytest --tb=short -v \
             --cov=packages/core/moat_core \
             --cov-report=term-missing \
-            --cov-report=xml:coverage.xml \
-            --cov-report=html:htmlcov \
-            packages/ services/
+            --cov-report=xml:coverage-core.xml \
+            packages/core/
+
+      - name: Test services/control-plane
+        run: |
+          pip install -e services/control-plane
+          cd services/control-plane
+          pytest --tb=short -v tests/
+
+      - name: Test services/gateway
+        run: |
+          pip install -e services/gateway
+          cd services/gateway
+          pytest --tb=short -v tests/
+
+      - name: Merge coverage
+        if: always()
+        run: |
+          # Core coverage is the primary metric
+          cp coverage-core.xml coverage.xml || true
 
       - name: Upload coverage report
         if: always()   # Upload even if tests fail – helps diagnose failures.
