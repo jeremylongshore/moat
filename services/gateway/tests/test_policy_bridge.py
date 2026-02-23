@@ -25,6 +25,11 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///test.db")
 os.environ.setdefault("MOAT_AUTH_DISABLED", "true")
 
 import pytest
+from moat_core.models import (
+    CapabilityStatus,
+    PolicyBundle,
+    RiskClass,
+)
 
 from app.policy_bridge import (
     PolicyResult,
@@ -37,12 +42,6 @@ from app.policy_bridge import (
     record_spend,
     register_policy_bundle,
 )
-from moat_core.models import (
-    CapabilityStatus,
-    PolicyBundle,
-    RiskClass,
-)
-
 
 # ---------------------------------------------------------------------------
 # Shared helpers / factory functions
@@ -682,8 +681,12 @@ class TestEvaluatePolicy:
 
     def test_budget_check_uses_correct_tenant_spend(self):
         """Budget enforcement is scoped to the requesting tenant, not others."""
-        bundle_a = _make_bundle(tenant_id="tenant-a", capability_id="cap-shared", budget_daily=100)
-        bundle_b = _make_bundle(tenant_id="tenant-b", capability_id="cap-shared", budget_daily=100)
+        bundle_a = _make_bundle(
+            tenant_id="tenant-a", capability_id="cap-shared", budget_daily=100
+        )
+        bundle_b = _make_bundle(
+            tenant_id="tenant-b", capability_id="cap-shared", budget_daily=100
+        )
         register_policy_bundle(bundle_a)
         register_policy_bundle(bundle_b)
 
@@ -708,7 +711,7 @@ class TestEvaluatePolicy:
         )
 
         assert result_a.allowed is False  # Budget exceeded.
-        assert result_b.allowed is True   # Budget not touched.
+        assert result_b.allowed is True  # Budget not touched.
 
     # --- PolicyResult field contract ---
 

@@ -38,7 +38,9 @@ _DEFAULT_TIMEOUT_S = 120
 _MAX_OUTPUT_BYTES = 1_048_576  # 1 MB
 
 # Allowlisted URL patterns for parameter validation
-_GITHUB_URL_RE = re.compile(r"^https://github\.com/[\w.\-]+/[\w.\-]+/(pull|issues)/\d+$")
+_GITHUB_URL_RE = re.compile(
+    r"^https://github\.com/[\w.\-]+/[\w.\-]+/(pull|issues)/\d+$"
+)
 
 # Command templates per capability.
 # {url} is the only substitutable parameter; everything else is fixed.
@@ -159,7 +161,7 @@ class LocalCLIAdapter(AdapterInterface):
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # Kill the process on timeout
             try:
                 proc.kill()
@@ -168,7 +170,7 @@ class LocalCLIAdapter(AdapterInterface):
                 pass
             raise RuntimeError(
                 f"Command timed out after {timeout}s for capability '{capability_id}'"
-            )
+            ) from None
 
         end = datetime.now(UTC)
         latency_ms = (end - start).total_seconds() * 1000

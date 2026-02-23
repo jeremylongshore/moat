@@ -45,30 +45,38 @@ logger = logging.getLogger(__name__)
 _MAX_TIMEOUT_SECONDS = 30.0
 
 # Hop-by-hop headers (RFC 2616 s13.5.1) — never forwarded.
-_HOP_BY_HOP_HEADERS = frozenset({
-    "connection",
-    "keep-alive",
-    "proxy-authenticate",
-    "proxy-authorization",
-    "te",
-    "trailers",
-    "transfer-encoding",
-    "upgrade",
-})
+_HOP_BY_HOP_HEADERS = frozenset(
+    {
+        "connection",
+        "keep-alive",
+        "proxy-authenticate",
+        "proxy-authorization",
+        "te",
+        "trailers",
+        "transfer-encoding",
+        "upgrade",
+    }
+)
 
 # Headers the adapter never forwards from the caller.
-_STRIPPED_REQUEST_HEADERS = _HOP_BY_HOP_HEADERS | frozenset({
-    "host",
-    "content-length",  # httpx recalculates
-})
+_STRIPPED_REQUEST_HEADERS = _HOP_BY_HOP_HEADERS | frozenset(
+    {
+        "host",
+        "content-length",  # httpx recalculates
+    }
+)
 
 # Headers stripped from the upstream response before returning to the agent.
-_STRIPPED_RESPONSE_HEADERS = _HOP_BY_HOP_HEADERS | frozenset({
-    "content-encoding",  # httpx already decodes
-    "content-length",
-})
+_STRIPPED_RESPONSE_HEADERS = _HOP_BY_HOP_HEADERS | frozenset(
+    {
+        "content-encoding",  # httpx already decodes
+        "content-length",
+    }
+)
 
-_ALLOWED_METHODS = frozenset({"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"})
+_ALLOWED_METHODS = frozenset(
+    {"GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"}
+)
 
 # Persistent HTTP client — reused across requests for connection pooling.
 _http_client: httpx.AsyncClient | None = None
@@ -107,7 +115,7 @@ def _is_private_ip(hostname: str) -> bool:
         # Not a bare IP — hostname will be resolved by httpx.
         # We block known private patterns.
         lower = hostname.lower()
-        return lower in ("localhost",) or lower.endswith(".local") or lower.endswith(".internal")
+        return lower == "localhost" or lower.endswith((".local", ".internal"))
 
 
 def _validate_url(url: str, allowlist: set[str]) -> str:
@@ -119,7 +127,9 @@ def _validate_url(url: str, allowlist: set[str]) -> str:
 
     # Require HTTPS (allow HTTP only for localhost in tests)
     if parsed.scheme not in ("https", "http"):
-        raise RuntimeError(f"Unsupported scheme: {parsed.scheme!r}. Only HTTPS is allowed.")
+        raise RuntimeError(
+            f"Unsupported scheme: {parsed.scheme!r}. Only HTTPS is allowed."
+        )
 
     if parsed.scheme == "http" and parsed.hostname not in ("localhost", "127.0.0.1"):
         raise RuntimeError("HTTP is not allowed for external requests. Use HTTPS.")
@@ -130,7 +140,9 @@ def _validate_url(url: str, allowlist: set[str]) -> str:
 
     # Block private IPs / internal hosts
     if _is_private_ip(hostname):
-        raise RuntimeError(f"Requests to private/internal addresses are blocked: {hostname}")
+        raise RuntimeError(
+            f"Requests to private/internal addresses are blocked: {hostname}"
+        )
 
     # Check domain allowlist
     if hostname not in allowlist:
@@ -208,7 +220,9 @@ class HttpProxyAdapter(AdapterInterface):
         body = params.get("body")
 
         # Timeout — capped at _MAX_TIMEOUT_SECONDS
-        timeout = min(float(params.get("timeout", _MAX_TIMEOUT_SECONDS)), _MAX_TIMEOUT_SECONDS)
+        timeout = min(
+            float(params.get("timeout", _MAX_TIMEOUT_SECONDS)), _MAX_TIMEOUT_SECONDS
+        )
 
         logger.info(
             "Proxying HTTP request",

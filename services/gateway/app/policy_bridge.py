@@ -22,11 +22,9 @@ Moat-specific features that don't have Cedar equivalents.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
-
-import httpx
 
 from moat_core.models import (
     CapabilityManifest,
@@ -36,8 +34,6 @@ from moat_core.models import (
     RiskClass,
 )
 from moat_core.policy import evaluate_policy as _core_evaluate
-
-from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -230,5 +226,7 @@ def evaluate_policy(
         allowed=decision.allowed,
         reason=decision.rule_hit,
         rule_hit=decision.rule_hit,
-        risk_class=manifest.risk_class.value if hasattr(manifest.risk_class, 'value') else str(manifest.risk_class),
+        risk_class=manifest.risk_class.value
+        if hasattr(manifest.risk_class, "value")
+        else str(manifest.risk_class),
     )

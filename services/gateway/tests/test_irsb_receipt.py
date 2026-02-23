@@ -30,10 +30,7 @@ os.environ.setdefault("DATABASE_URL", "sqlite+aiosqlite:///test.db")
 os.environ.setdefault("MOAT_AUTH_DISABLED", "true")
 os.environ.setdefault("IRSB_DRY_RUN", "true")
 
-import importlib
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from unittest.mock import AsyncMock, patch
 
 from app.hooks.irsb_receipt import (
     _build_message_hash,
@@ -100,7 +97,9 @@ class TestHashComputation:
 
     def test_intent_hash_returns_32_bytes(self):
         """compute_intent_hash output is exactly 32 bytes."""
-        h = compute_intent_hash("cap-x", "input-hash-abc", "tenant-1", "2026-01-01T00:00:00Z")
+        h = compute_intent_hash(
+            "cap-x", "input-hash-abc", "tenant-1", "2026-01-01T00:00:00Z"
+        )
         assert len(h) == 32
 
     def test_intent_hash_is_deterministic(self):
@@ -259,19 +258,19 @@ class TestBuildMessageHash:
 
     def _call(self, **overrides) -> bytes:
         """Call _build_message_hash with reasonable defaults, applying overrides."""
-        defaults = dict(
-            chain_id=11155111,
-            contract_address="0xD66A1e880AA3939CA066a9EA1dD37ad3d01D977c",
-            nonce=0,
-            intent_hash=_keccak256(b"intent"),
-            constraints_hash=_keccak256(b"constraints"),
-            route_hash=_keccak256(b"route"),
-            outcome_hash=_keccak256(b"outcome"),
-            evidence_hash=_keccak256(b"evidence"),
-            created_at=1_700_000_000,
-            expiry=1_700_086_400,
-            solver_id=_to_bytes32("0x83Be08FFB22b61733eDf15b0ee9Caf5562cd888d"),
-        )
+        defaults = {
+            "chain_id": 11155111,
+            "contract_address": "0xD66A1e880AA3939CA066a9EA1dD37ad3d01D977c",
+            "nonce": 0,
+            "intent_hash": _keccak256(b"intent"),
+            "constraints_hash": _keccak256(b"constraints"),
+            "route_hash": _keccak256(b"route"),
+            "outcome_hash": _keccak256(b"outcome"),
+            "evidence_hash": _keccak256(b"evidence"),
+            "created_at": 1_700_000_000,
+            "expiry": 1_700_086_400,
+            "solver_id": _to_bytes32("0x83Be08FFB22b61733eDf15b0ee9Caf5562cd888d"),
+        }
         defaults.update(overrides)
         return _build_message_hash(**defaults)
 
@@ -326,17 +325,17 @@ class TestBuildMessageHash:
         """
         base = self._call()
         mutations = [
-            dict(chain_id=1),
-            dict(contract_address="0xB6ab964832808E49635fF82D1996D6a888ecB745"),
-            dict(nonce=42),
-            dict(intent_hash=_keccak256(b"x")),
-            dict(constraints_hash=_keccak256(b"x")),
-            dict(route_hash=_keccak256(b"x")),
-            dict(outcome_hash=_keccak256(b"x")),
-            dict(evidence_hash=_keccak256(b"x")),
-            dict(created_at=0),
-            dict(expiry=9_999_999_999),
-            dict(solver_id=_to_bytes32("0x0000000000000000000000000000000000000001")),
+            {"chain_id": 1},
+            {"contract_address": "0xB6ab964832808E49635fF82D1996D6a888ecB745"},
+            {"nonce": 42},
+            {"intent_hash": _keccak256(b"x")},
+            {"constraints_hash": _keccak256(b"x")},
+            {"route_hash": _keccak256(b"x")},
+            {"outcome_hash": _keccak256(b"x")},
+            {"evidence_hash": _keccak256(b"x")},
+            {"created_at": 0},
+            {"expiry": 9_999_999_999},
+            {"solver_id": _to_bytes32("0x0000000000000000000000000000000000000001")},
         ]
         for mutation in mutations:
             mutated = self._call(**mutation)
@@ -425,7 +424,7 @@ class TestPostIrsbReceipt:
     """
 
     async def test_dry_run_returns_receipt_with_dry_run_chain(self):
-        """In dry-run mode, post_irsb_receipt returns a receipt dict with chain='dry_run'."""
+        """In dry-run mode, post_irsb_receipt returns receipt with chain='dry_run'."""
         import app.hooks.irsb_receipt as mod
 
         with patch.object(mod, "DRY_RUN", True):
@@ -442,12 +441,18 @@ class TestPostIrsbReceipt:
             result = await post_irsb_receipt(_make_receipt())
 
         assert result is not None
-        for field in ("intent_hash", "outcome_hash", "constraints_hash", "route_hash", "evidence_hash"):
+        for field in (
+            "intent_hash",
+            "outcome_hash",
+            "constraints_hash",
+            "route_hash",
+            "evidence_hash",
+        ):
             assert field in result, f"Missing field: {field}"
             assert result[field].startswith("0x"), f"{field} should be 0x-prefixed"
 
     async def test_dry_run_receipt_contains_metadata_fields(self):
-        """The dry-run receipt carries capability_id, tenant_id, moat_receipt_id, and solver."""
+        """The dry-run receipt carries capability_id, tenant_id, moat_receipt_id."""
         import app.hooks.irsb_receipt as mod
 
         receipt_in = _make_receipt()
@@ -461,11 +466,12 @@ class TestPostIrsbReceipt:
 
     async def test_non_success_status_returns_none(self):
         """A receipt with status != 'success' is silently skipped (returns None)."""
-        import app.hooks.irsb_receipt as mod
 
         for status in ("failure", "timeout", "policy_denied", "error"):
             result = await post_irsb_receipt(_make_receipt(status=status))
-            assert result is None, f"Expected None for status={status!r}, got {result!r}"
+            assert result is None, (
+                f"Expected None for status={status!r}, got {result!r}"
+            )
 
     async def test_no_rpc_url_falls_back_to_dry_run_no_rpc(self):
         """When DRY_RUN=False but no RPC URL is set, falls back to dry_run_no_rpc."""
@@ -482,7 +488,7 @@ class TestPostIrsbReceipt:
         assert result["chain"] == "dry_run_no_rpc"
 
     async def test_no_signing_key_falls_back_to_dry_run_no_key(self):
-        """When DRY_RUN=False but no signing key is set, falls back to dry_run_no_key."""
+        """When DRY_RUN=False but no signing key, falls back to dry_run_no_key."""
         import app.hooks.irsb_receipt as mod
 
         with (
@@ -524,7 +530,7 @@ class TestPostIrsbReceipt:
         assert result["gas_used"] == 50_000
 
     async def test_live_mode_submit_exception_returns_error_receipt(self):
-        """When _submit_on_chain raises, the exception is caught and chain='sepolia_failed'."""
+        """When _submit_on_chain raises, exception is caught, chain='sepolia_failed'."""
         import app.hooks.irsb_receipt as mod
 
         with (
@@ -565,7 +571,13 @@ class TestPostIrsbReceipt:
             r2 = await post_irsb_receipt(receipt)
 
         assert r1 is not None and r2 is not None
-        for field in ("intent_hash", "outcome_hash", "constraints_hash", "route_hash", "evidence_hash"):
+        for field in (
+            "intent_hash",
+            "outcome_hash",
+            "constraints_hash",
+            "route_hash",
+            "evidence_hash",
+        ):
             assert r1[field] == r2[field], f"Non-deterministic field: {field}"
 
 
@@ -590,7 +602,7 @@ class TestDryRunMode:
         # (We patch it directly in async tests; here we check the parsing logic.)
         dry_run_env = os.environ.get("IRSB_DRY_RUN", "true").lower()
         expected = dry_run_env == "true"
-        assert mod.DRY_RUN == expected
+        assert expected == mod.DRY_RUN
 
     def test_dry_run_true_skips_on_chain_submission(self):
         """When DRY_RUN=True, _submit_on_chain is never called."""
@@ -661,9 +673,10 @@ class TestDryRunMode:
                 result = await post_irsb_receipt(_make_receipt())
 
             assert result is not None, f"Scenario {expected_chain!r} returned None"
+            key_str = "set" if key else "None"
             assert result["chain"] == expected_chain, (
                 f"Expected chain={expected_chain!r}, got {result['chain']!r} "
-                f"for scenario (DRY_RUN={dry_run}, rpc={rpc!r}, key={'set' if key else None!r})"
+                f"for scenario (DRY_RUN={dry_run}, rpc={rpc!r}, key={key_str!r})"
             )
 
 
@@ -689,7 +702,7 @@ class TestHashPrimitives:
 
     def test_keccak256_known_vector(self):
         """_keccak256(b'') matches the well-known empty-string keccak256 digest."""
-        # keccak256("") = 0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470
+        # keccak256("") = c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b...
         expected = bytes.fromhex(
             "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"
         )

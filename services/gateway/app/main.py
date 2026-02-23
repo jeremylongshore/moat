@@ -113,18 +113,18 @@ def _seed_policy_bundles() -> None:
             budget_daily=15000,  # $150/day
             domain_allowlist=[
                 # Bounty platforms (REST APIs)
-                "api.github.com",       # GitHub — foundation layer + audit contest repos
-                "console.algora.io",    # Algora — open-source bounties
-                "gitcoin.co",           # Gitcoin — public bounty API (no auth)
-                "api.polar.sh",         # Polar.sh — sponsored issues (KEY NEEDED)
-                "api.hackerone.com",     # HackerOne — bug bounties (KEY NEEDED)
-                "api.bugcrowd.com",     # Bugcrowd — vulnerability bounties (KEY NEEDED)
+                "api.github.com",  # GitHub — foundation layer + audit contest repos
+                "console.algora.io",  # Algora — open-source bounties
+                "gitcoin.co",  # Gitcoin — public bounty API (no auth)
+                "api.polar.sh",  # Polar.sh — sponsored issues (KEY NEEDED)
+                "api.hackerone.com",  # HackerOne — bug bounties (KEY NEEDED)
+                "api.bugcrowd.com",  # Bugcrowd — vulnerability bounties (KEY NEEDED)
                 # Web3 on-chain reads (RPC endpoints)
-                "api.thegraph.com",     # The Graph — subgraph queries for Web3 platforms
-                "eth-mainnet.g.alchemy.com",     # Ethereum mainnet RPC (KEY NEEDED)
-                "polygon-mainnet.g.alchemy.com", # Polygon RPC
-                "arb-mainnet.g.alchemy.com",     # Arbitrum RPC
-                "opt-mainnet.g.alchemy.com",     # Optimism RPC
+                "api.thegraph.com",  # The Graph — subgraph queries for Web3 platforms
+                "eth-mainnet.g.alchemy.com",  # Ethereum mainnet RPC (KEY NEEDED)
+                "polygon-mainnet.g.alchemy.com",  # Polygon RPC
+                "arb-mainnet.g.alchemy.com",  # Arbitrum RPC
+                "opt-mainnet.g.alchemy.com",  # Optimism RPC
             ],
         ),
     ]

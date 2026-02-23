@@ -61,22 +61,24 @@ def _get_http_client() -> httpx.AsyncClient:
 
 # Keys from the agent's params that we forward to OpenAI.
 # Anything not in this set is stripped to prevent injection.
-_ALLOWED_BODY_KEYS = frozenset({
-    "model",
-    "messages",
-    "tools",
-    "tool_choice",
-    "max_tokens",
-    "max_completion_tokens",
-    "temperature",
-    "top_p",
-    "stream",
-    "stop",
-    "presence_penalty",
-    "frequency_penalty",
-    "n",
-    "response_format",
-})
+_ALLOWED_BODY_KEYS = frozenset(
+    {
+        "model",
+        "messages",
+        "tools",
+        "tool_choice",
+        "max_tokens",
+        "max_completion_tokens",
+        "temperature",
+        "top_p",
+        "stream",
+        "stop",
+        "presence_penalty",
+        "frequency_penalty",
+        "n",
+        "response_format",
+    }
+)
 
 
 class OpenAIAdapter(AdapterInterface):

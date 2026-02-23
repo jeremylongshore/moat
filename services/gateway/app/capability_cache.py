@@ -98,7 +98,10 @@ async def get_capability(capability_id: str) -> dict[str, Any] | None:
                             _cache.set(capability_id, cap)
                             logger.debug(
                                 "Capability found by name",
-                                extra={"capability_id": capability_id, "name": cap.get("name")},
+                                extra={
+                                    "capability_id": capability_id,
+                                    "name": cap.get("name"),
+                                },
                             )
                             return cap
                 return None
