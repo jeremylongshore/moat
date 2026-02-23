@@ -120,16 +120,17 @@ jobs:
       - name: Install dev dependencies
         run: pip install -r requirements-dev.txt
 
-      - name: Install moat-core
-        run: pip install -e packages/core
-
-      # Run tests per-service to avoid 'app' package name collisions.
-      # Each service uses 'app' as its internal package name, so editable
-      # installs overwrite each other. Testing in isolation prevents this.
+      # Install moat-core + all runtime deps needed by services.
+      # Do NOT pip install -e services/* (they all share the 'app' package
+      # name and editable installs collide). Instead, use PYTHONPATH to
+      # point each test step at the correct service's app package.
+      - name: Install dependencies
+        run: |
+          pip install -e packages/core
+          pip install httpx fastapi uvicorn pydantic-settings web3 eth-account
 
       - name: Test packages/core
         run: |
-          pip install httpx
           cd packages/core
           pytest --tb=short -v \
             --cov=moat_core \
@@ -138,21 +139,18 @@ jobs:
             tests/
 
       - name: Test services/control-plane
-        run: |
-          pip install -e services/control-plane
-          cd services/control-plane
-          pytest --tb=short -v tests/
+        env:
+          PYTHONPATH: services/control-plane
+        run: pytest --tb=short -v services/control-plane/tests/
 
       - name: Test services/gateway
-        run: |
-          pip install -e services/gateway
-          cd services/gateway
-          pytest --tb=short -v tests/
+        env:
+          PYTHONPATH: services/gateway
+        run: pytest --tb=short -v services/gateway/tests/
 
       - name: Merge coverage
         if: always()
         run: |
-          # Core coverage is the primary metric
           cp coverage-core.xml coverage.xml || true
 
       - name: Upload coverage report
