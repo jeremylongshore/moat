@@ -109,19 +109,16 @@ ignore_missing_imports = true
 # asyncio_mode=auto lets pytest-asyncio handle async tests without decorators.
 asyncio_mode = "auto"
 
-# importlib mode prevents namespace package conflicts when multiple services
-# each have a tests/ directory with __init__.py (avoids "No module named
-# tests.conftest" errors).
-import_mode = "importlib"
-
 testpaths = [
     "packages",
     "services",
 ]
 
-# Show 10 slowest tests; useful for spotting accidental integration tests in
-# the unit suite.
-addopts = "--tb=short -q --durations=10"
+# --import-mode=importlib prevents namespace package conflicts when multiple
+# services each have a tests/ directory with __init__.py (avoids "No module
+# named tests.conftest" errors).  Show 10 slowest tests to spot accidental
+# integration tests in the unit suite.
+addopts = "--import-mode=importlib --tb=short -q --durations=10"
 
 # Markers used across the monorepo (avoids "unknown marker" warnings).
 markers = [
