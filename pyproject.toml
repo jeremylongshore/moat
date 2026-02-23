@@ -109,6 +109,11 @@ ignore_missing_imports = true
 # asyncio_mode=auto lets pytest-asyncio handle async tests without decorators.
 asyncio_mode = "auto"
 
+# importlib mode prevents namespace package conflicts when multiple services
+# each have a tests/ directory with __init__.py (avoids "No module named
+# tests.conftest" errors).
+import_mode = "importlib"
+
 testpaths = [
     "packages",
     "services",
