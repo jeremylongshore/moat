@@ -16,7 +16,7 @@ Production upgrade path
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -40,7 +40,7 @@ class CapabilityCache:
         fetched = self._fetched_at.get(capability_id)
         if fetched is None:
             return True
-        return datetime.now(timezone.utc) - fetched > _CACHE_TTL
+        return datetime.now(UTC) - fetched > _CACHE_TTL
 
     def get(self, capability_id: str) -> dict[str, Any] | None:
         if self._is_expired(capability_id):
@@ -49,7 +49,7 @@ class CapabilityCache:
 
     def set(self, capability_id: str, capability: dict[str, Any]) -> None:
         self._cache[capability_id] = capability
-        self._fetched_at[capability_id] = datetime.now(timezone.utc)
+        self._fetched_at[capability_id] = datetime.now(UTC)
 
     def invalidate(self, capability_id: str) -> None:
         self._cache.pop(capability_id, None)
@@ -80,10 +80,30 @@ async def get_capability(capability_id: str) -> dict[str, Any] | None:
 
     try:
         async with httpx.AsyncClient(timeout=settings.HTTP_TIMEOUT) as client:
+            # Try by ID first (UUID)
             response = await client.get(
                 f"{settings.CONTROL_PLANE_URL}/capabilities/{capability_id}"
             )
             if response.status_code == 404:
+                # Fall back to name-based search (e.g. "openai.inference")
+                list_resp = await client.get(
+                    f"{settings.CONTROL_PLANE_URL}/capabilities"
+                )
+                if list_resp.status_code == 200:
+                    data = list_resp.json()
+                    # Control plane returns {"items": [...], "total": N}
+                    items = data.get("items", []) if isinstance(data, dict) else data
+                    for cap in items:
+                        if isinstance(cap, dict) and cap.get("name") == capability_id:
+                            _cache.set(capability_id, cap)
+                            logger.debug(
+                                "Capability found by name",
+                                extra={
+                                    "capability_id": capability_id,
+                                    "name": cap.get("name"),
+                                },
+                            )
+                            return cap
                 return None
             response.raise_for_status()
             capability = response.json()
@@ -109,7 +129,7 @@ async def get_capability(capability_id: str) -> dict[str, Any] | None:
             "output_schema": {},
             "status": "active",
             "tags": [],
-            "created_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
             "_stub": True,
         }
         _cache.set(capability_id, stub)

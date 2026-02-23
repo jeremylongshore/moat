@@ -57,7 +57,9 @@ def redact_dict(data: Any, _depth: int = 0) -> Any:
         return data
     if isinstance(data, dict):
         return {
-            k: "[REDACTED]" if k.lower() in _SENSITIVE_KEYS else redact_dict(v, _depth + 1)
+            k: "[REDACTED]"
+            if k.lower() in _SENSITIVE_KEYS
+            else redact_dict(v, _depth + 1)
             for k, v in data.items()
         }
     if isinstance(data, list):

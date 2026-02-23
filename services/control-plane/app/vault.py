@@ -23,8 +23,8 @@ SecretManagerVault
 
 from __future__ import annotations
 
+import os
 import secrets
-import uuid
 from abc import ABC, abstractmethod
 
 
@@ -156,6 +156,31 @@ class SecretManagerVault(VaultInterface):
             "Use LocalVault for development or implement the GCP integration. "
             f"Key: {key!r}"
         )
+
+
+class EnvVault(VaultInterface):
+    """Vault that reads secrets from environment variables.
+
+    Useful for local development and CI where secrets are injected
+    via env vars rather than a vault service.
+
+    Reference format: ``env://VARIABLE_NAME``
+    """
+
+    async def get_secret(self, reference: str) -> str:
+        if reference.startswith("env://"):
+            var_name = reference[6:]  # Strip "env://" prefix
+            value = os.environ.get(var_name, "")
+            if not value:
+                raise KeyError(f"Environment variable not set: {var_name!r}")
+            return value
+        raise KeyError(f"EnvVault only handles env:// references, got: {reference!r}")
+
+    async def store_secret(self, key: str, value: str) -> str:
+        # For env vault, we store in memory and return an env-style reference
+        var_name = key.upper().replace("/", "_").replace("-", "_")
+        os.environ[var_name] = value
+        return f"env://{var_name}"
 
 
 def get_vault(project_id: str | None = None) -> VaultInterface:

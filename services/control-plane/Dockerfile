@@ -28,8 +28,9 @@ RUN python -m venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Install shared core package first (cached layer – changes rarely).
+# Include [postgres] extra for asyncpg driver needed by DATABASE_URL.
 COPY packages/core /tmp/core
-RUN pip install --no-cache-dir /tmp/core
+RUN pip install --no-cache-dir "/tmp/core[postgres]"
 
 # Install service package (changes more frequently – separate layer).
 COPY services/control-plane /tmp/service

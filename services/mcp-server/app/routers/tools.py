@@ -37,13 +37,13 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from moat_core.auth import get_current_tenant
 from pydantic import BaseModel, Field
 
 from app.http_client import (
-    cp_get_capability,
     cp_list_capabilities,
     gw_execute,
     tp_get_stats,
@@ -57,6 +57,7 @@ router = APIRouter(prefix="/tools", tags=["tools"])
 # ---------------------------------------------------------------------------
 # Shared response envelope
 # ---------------------------------------------------------------------------
+
 
 class ToolResponse(BaseModel):
     """Standard MCP tool response envelope."""
@@ -74,6 +75,7 @@ def _response(tool: str, result: dict[str, Any], request: Request) -> ToolRespon
 # ---------------------------------------------------------------------------
 # capabilities.list
 # ---------------------------------------------------------------------------
+
 
 class ListFilter(BaseModel):
     provider: str | None = None
@@ -93,6 +95,7 @@ class CapabilitiesListRequest(BaseModel):
 async def tool_capabilities_list(
     body: CapabilitiesListRequest,
     request: Request,
+    tenant_id: Annotated[str, Depends(get_current_tenant)],
 ) -> ToolResponse:
     """List capabilities from the control plane registry.
 
@@ -120,10 +123,7 @@ async def tool_capabilities_list(
     items = data.get("items", [])
     if body.filter.verified is not None:
         # For MVP, filter only if items have verified field; otherwise pass through
-        items = [
-            item for item in items
-            if item.get("verified") == body.filter.verified
-        ]
+        items = [item for item in items if item.get("verified") == body.filter.verified]
         data = {**data, "items": items, "total": len(items)}
 
     logger.info(
@@ -137,6 +137,7 @@ async def tool_capabilities_list(
 # capabilities.search
 # ---------------------------------------------------------------------------
 
+
 class CapabilitiesSearchRequest(BaseModel):
     query: str = Field(..., min_length=1, description="Search query string")
 
@@ -149,6 +150,7 @@ class CapabilitiesSearchRequest(BaseModel):
 async def tool_capabilities_search(
     body: CapabilitiesSearchRequest,
     request: Request,
+    tenant_id: Annotated[str, Depends(get_current_tenant)],
 ) -> ToolResponse:
     """Search capabilities using substring matching on name and description.
 
@@ -170,7 +172,8 @@ async def tool_capabilities_search(
 
     query_lower = body.query.lower()
     matches = [
-        item for item in items
+        item
+        for item in items
         if query_lower in item.get("name", "").lower()
         or query_lower in item.get("description", "").lower()
         or any(query_lower in tag for tag in item.get("tags", []))
@@ -191,6 +194,7 @@ async def tool_capabilities_search(
 # ---------------------------------------------------------------------------
 # capabilities.execute
 # ---------------------------------------------------------------------------
+
 
 class CapabilitiesExecuteRequest(BaseModel):
     capability_id: str = Field(..., description="ID of the capability to execute")
@@ -214,6 +218,7 @@ class CapabilitiesExecuteRequest(BaseModel):
 async def tool_capabilities_execute(
     body: CapabilitiesExecuteRequest,
     request: Request,
+    auth_tenant_id: Annotated[str, Depends(get_current_tenant)],
 ) -> ToolResponse:
     """Execute a capability through the Moat gateway pipeline.
 
@@ -236,6 +241,12 @@ async def tool_capabilities_execute(
     - Idempotency (cached receipt returned on duplicate key)
     - Outcome event emission to trust plane
     """
+    if body.tenant_id != auth_tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Tenant ID in request body does not match authenticated tenant",
+        )
+
     result = await gw_execute(
         capability_id=body.capability_id,
         params=body.params,
@@ -260,8 +271,11 @@ async def tool_capabilities_execute(
 # capabilities.stats
 # ---------------------------------------------------------------------------
 
+
 class CapabilitiesStatsRequest(BaseModel):
-    capability_id: str = Field(..., description="ID of the capability to retrieve stats for")
+    capability_id: str = Field(
+        ..., description="ID of the capability to retrieve stats for"
+    )
 
 
 @router.post(
@@ -272,6 +286,7 @@ class CapabilitiesStatsRequest(BaseModel):
 async def tool_capabilities_stats(
     body: CapabilitiesStatsRequest,
     request: Request,
+    tenant_id: Annotated[str, Depends(get_current_tenant)],
 ) -> ToolResponse:
     """Retrieve rolling 7-day reliability statistics from the trust plane.
 

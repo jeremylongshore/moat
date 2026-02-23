@@ -8,10 +8,8 @@ and Protocol conformance.
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone
 
 import pytest
-import pytest_asyncio
 
 from moat_core import (
     IdempotencyStore,
@@ -20,7 +18,6 @@ from moat_core import (
     generate_idempotency_key,
 )
 from moat_core.models import ExecutionStatus
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

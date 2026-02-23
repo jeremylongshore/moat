@@ -40,7 +40,6 @@ from moat_core.models import (
     PolicyDecision,
 )
 
-
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -146,10 +145,7 @@ def evaluate_policy(
     # ------------------------------------------------------------------
     # Rule 2: daily budget ceiling
     # ------------------------------------------------------------------
-    if (
-        bundle.budget_daily is not None
-        and current_spend_cents >= bundle.budget_daily
-    ):
+    if bundle.budget_daily is not None and current_spend_cents >= bundle.budget_daily:
         return _decision(
             bundle_id=bundle.id,
             tenant_id=bundle.tenant_id,
@@ -183,10 +179,7 @@ def evaluate_policy(
                 tenant_id=bundle.tenant_id,
                 capability_id=capability.id,
                 allowed=False,
-                rule_hit=(
-                    f"domain_allowlist_conflict:"
-                    f"disallowed={sorted(disallowed)}"
-                ),
+                rule_hit=(f"domain_allowlist_conflict:disallowed={sorted(disallowed)}"),
                 t_start=t_start,
                 request_id=_request_id,
             )
