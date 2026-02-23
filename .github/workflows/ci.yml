@@ -129,11 +129,13 @@ jobs:
 
       - name: Test packages/core
         run: |
+          pip install httpx
+          cd packages/core
           pytest --tb=short -v \
-            --cov=packages/core/moat_core \
+            --cov=moat_core \
             --cov-report=term-missing \
-            --cov-report=xml:coverage-core.xml \
-            packages/core/
+            --cov-report=xml:../../coverage-core.xml \
+            tests/
 
       - name: Test services/control-plane
         run: |
