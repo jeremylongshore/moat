@@ -1,1 +1,0 @@
-"""Gateway service test suite."""

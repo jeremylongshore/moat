@@ -8,6 +8,14 @@ and a temporary SQLite database for the idempotency store.
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
+
+# Ensure gateway service root is on sys.path so 'from app.xxx' resolves
+# to this service's app package (not another service's).
+_service_root = str(Path(__file__).resolve().parent.parent)
+if _service_root not in sys.path:
+    sys.path.insert(0, _service_root)
 import tempfile
 from collections.abc import Iterator
 from typing import Any
