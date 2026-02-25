@@ -33,6 +33,10 @@ make test-coverage # pytest with coverage report
 pytest packages/core/tests/test_policy.py -v
 pytest packages/core/tests/test_policy.py::test_name -v
 
+# Run a single service's tests
+pytest services/gateway/tests/ -v
+pytest services/control-plane/tests/ -v
+
 # End-to-end demo (requires services running)
 make demo
 
@@ -56,6 +60,43 @@ services/
   mcp-server (:8004)          Agent-facing tool surface (REST MVP; MCP SDK stdio planned)
 ```
 
+### moat_core import convention
+
+Always import from the top-level namespace — never reach into sub-modules:
+
+```python
+# Correct
+from moat_core import CapabilityManifest, evaluate_policy, PolicyBundle
+
+# Discouraged
+from moat_core.models import CapabilityManifest
+from moat_core.policy import evaluate_policy
+```
+
+DB access is via `moat_core.db` (lazy import): `from moat_core.db import init_tables, CapabilityRow`
+
+### Error hierarchy (`moat_core.errors`)
+
+```
+MoatError
+├── PolicyDeniedError (rule_hit, capability_id, tenant_id)
+│   └── BudgetExceededError (budget_cents, current_spend_cents, period)
+├── CapabilityNotFoundError (capability_id)
+├── AdapterError (provider, status_code, provider_request_id)
+└── IdempotencyConflictError (key)
+```
+
+### Service lifespan pattern
+
+All four services follow the same startup sequence in their `main.py` `lifespan()`:
+1. `configure_logging()` (module-level, before anything else logs)
+2. `configure_auth()` (reads `MOAT_AUTH_DISABLED` / `MOAT_JWT_SECRET`)
+3. `init_tables()` (async SQLAlchemy table creation)
+4. Service-specific store initialization
+5. Gateway only: `_seed_policy_bundles()` — registers 8 PolicyBundles for `"automaton"` tenant at startup (gwi.triage, gwi.review, gwi.issue-to-code, gwi.resolve, github.api, openai.inference, irsb.receipt, http.proxy)
+
+Middleware stack (outermost first): CORS → RequestID → Redaction (gateway only) → SecurityHeaders.
+
 ### Request flow (gateway execute pipeline)
 
 1. Fetch capability from control-plane (cached 5min via `capability_cache`; falls back to synthetic stub if control-plane unreachable)
@@ -75,7 +116,7 @@ services/
 All models are frozen (immutable) Pydantic v2 with UTC datetimes:
 - **CapabilityManifest** — registry entry with semver, risk_class, domain_allowlist, input/output schemas
 - **Receipt** — audit record with SHA-256 hashed inputs/outputs (no raw secrets)
-- **OutcomeEvent** — lightweight analytics event for SLO tracking
+- **OutcomeEvent** — lightweight analytics event for SLO tracking (validator requires `error_taxonomy` when `success=False`)
 - **PolicyBundle** — tenant-scoped rules: allowed_scopes, budget_daily, domain_allowlist, require_approval
 - **PolicyDecision** — immutable evaluation result with rule_hit and timing
 
@@ -141,6 +182,36 @@ DB-backed rolling 7-day window. Configurable thresholds:
 - `MAX_P95_LATENCY_MS=10000` — above this, `should_throttle()` kicks in
 - `verified` flag requires 10+ executions AND success rate >= threshold
 
+## Testing
+
+### Test structure and conftest patterns
+
+Each service's `conftest.py` follows the same pattern:
+1. Inserts the service root onto `sys.path` so `from app.xxx` resolves to *that* service's `app/` package
+2. Creates a temp SQLite DB via `tempfile.mkstemp` and sets `DATABASE_URL` env var
+3. Sets `MOAT_AUTH_DISABLED=true`
+
+The root `conftest.py` only ensures `packages/core` is importable — it contains no fixtures. This file is required to prevent `--import-mode=importlib` namespace conflicts across multiple `tests/` directories.
+
+### Gateway test fixtures (`services/gateway/tests/conftest.py`)
+
+- `mock_get_capability` — patches `app.routers.execute.get_capability`; returns mock capabilities for `test-cap-123` (stub), `slack-cap-123` (slack), `inactive-cap` (inactive), `None` otherwise
+- `mock_emit_outcome` — patches `app.routers.execute._emit_outcome_event` as `AsyncMock`
+- `test_client` — depends on both mocks; registers a `PolicyBundle` for `dev-tenant:test-cap-123` (budget 100k cents); yields `TestClient(app)`
+
+When writing gateway tests, you must register a PolicyBundle for your test capability via `register_policy_bundle()` or the default-deny policy will reject every request.
+
+### CI test quirk
+
+In CI, service tests run via `PYTHONPATH=services/<svc>` (NOT editable installs) to avoid `app` package name collisions between services. Locally, `pip install -e` works fine because pytest collects one service at a time.
+
+### pytest configuration
+
+- `asyncio_mode = "auto"` — async test functions run automatically, no `@pytest.mark.asyncio` needed
+- `--import-mode=importlib` — prevents namespace package conflicts across service `tests/` dirs
+- Markers: `@pytest.mark.unit`, `@pytest.mark.integration`, `@pytest.mark.slow`, `@pytest.mark.docker`
+- Coverage floor: `fail_under = 50`
+
 ## Monorepo layout
 
 - Each service has its own `pyproject.toml` with hatchling build and `app/` package
@@ -148,8 +219,8 @@ DB-backed rolling 7-day window. Configurable thresholds:
 - Services depend on `moat-core` as a pip dependency (installed editable via `-e packages/core`)
 - `infra/local/` — docker-compose (Postgres 16 + Redis 7), `.env.example`
 - `000-docs/` — 11 design docs using doc-filing system (NNN-CC-ABCD format); check relevant docs before architectural decisions
-- `scripts/dev.sh` — starts all 4 uvicorn processes with `--reload`
-- `scripts/demo.sh` — registers a capability, executes it, fetches stats
+- `scripts/dev.sh` — starts all 4 uvicorn processes with `--reload`; checks ports 8001-8004 are free; auto-installs all packages
+- `scripts/demo.sh` — health-checks services (auto-starts if down), registers a capability, executes it, fetches stats
 
 ### Environment variables (key ones)
 
@@ -181,9 +252,6 @@ The `http.proxy` capability enables sandboxed agents to make outbound HTTP reque
 - **Secrets**: credentials live in vault abstraction (`control-plane/app/vault.py`); agents never see raw secrets. Receipt stores only SHA-256 hashes.
 - **Request tracing**: `X-Request-ID` header propagated across services via middleware.
 - **Security headers**: `SecurityHeadersMiddleware` on all services (HSTS, X-Frame-Options DENY, nosniff, no-cache).
-- **Test markers**: `@pytest.mark.unit`, `@pytest.mark.integration`, `@pytest.mark.slow`, `@pytest.mark.docker`
-- **asyncio**: `asyncio_mode = "auto"` — async tests don't need decorators.
-- **Coverage floor**: `fail_under = 50` (configured in root `pyproject.toml`)
 - **License**: Elastic License 2.0
 
 ## CI/CD
