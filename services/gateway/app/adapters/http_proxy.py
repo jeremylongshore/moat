@@ -30,7 +30,6 @@ Setup
 
 from __future__ import annotations
 
-import ipaddress
 import logging
 import os
 from typing import Any
@@ -39,6 +38,7 @@ from urllib.parse import urlparse
 import httpx
 
 from app.adapters.base import AdapterInterface
+from app.adapters.network_utils import is_private_ip
 
 logger = logging.getLogger(__name__)
 
@@ -107,15 +107,11 @@ def _get_domain_allowlist() -> set[str]:
 
 
 def _is_private_ip(hostname: str) -> bool:
-    """Check if a hostname resolves to a private/reserved IP range."""
-    try:
-        addr = ipaddress.ip_address(hostname)
-        return addr.is_private or addr.is_reserved or addr.is_loopback
-    except ValueError:
-        # Not a bare IP — hostname will be resolved by httpx.
-        # We block known private patterns.
-        lower = hostname.lower()
-        return lower == "localhost" or lower.endswith((".local", ".internal"))
+    """Check if a hostname resolves to a private/reserved IP range.
+
+    Delegates to the shared network_utils module.
+    """
+    return is_private_ip(hostname)
 
 
 def _validate_url(url: str, allowlist: set[str]) -> str:

@@ -35,6 +35,7 @@ from app.adapters.local_cli import LocalCLIAdapter
 from app.adapters.openai_proxy import OpenAIAdapter
 from app.adapters.slack import SlackAdapter
 from app.adapters.stub import StubAdapter
+from app.adapters.web3_rpc import Web3Adapter
 from app.capability_cache import get_capability
 from app.config import settings
 from app.hooks.irsb_receipt import post_irsb_receipt
@@ -47,6 +48,7 @@ adapter_registry.register(SlackAdapter())
 adapter_registry.register(LocalCLIAdapter())
 adapter_registry.register(OpenAIAdapter())
 adapter_registry.register(HttpProxyAdapter())
+adapter_registry.register(Web3Adapter())
 
 logger = logging.getLogger(__name__)
 

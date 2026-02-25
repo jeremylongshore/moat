@@ -70,6 +70,7 @@ python_version = "3.11"
 explicit_package_bases = true
 mypy_path = [
     "packages/core",
+    "packages/cli",
     "services/control-plane",
     "services/gateway",
     "services/trust-plane",

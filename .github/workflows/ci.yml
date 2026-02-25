@@ -90,6 +90,7 @@ jobs:
         run: |
           pip install mypy>=1.9.0 pydantic>=2.0.0
           pip install -e packages/core
+          pip install -e packages/cli
           pip install -e services/control-plane
           pip install -e services/gateway
           pip install -e services/trust-plane
@@ -189,6 +190,7 @@ jobs:
           pip install pip-audit>=2.7.0
           pip install -r requirements-dev.txt
           pip install -e packages/core
+          pip install -e packages/cli
           pip install -e services/control-plane
           pip install -e services/gateway
           pip install -e services/trust-plane
@@ -239,6 +241,7 @@ jobs:
           - { name: gateway, context: ".", dockerfile: services/gateway/Dockerfile }
           - { name: control-plane, context: ".", dockerfile: services/control-plane/Dockerfile }
           - { name: trust-plane, context: ".", dockerfile: services/trust-plane/Dockerfile }
+          - { name: mcp-server, context: ".", dockerfile: services/mcp-server/Dockerfile }
 
     steps:
       - name: Checkout

@@ -396,3 +396,49 @@ class PolicyDecision(_FrozenModel):
         min_length=1,
         description="Caller-supplied request ID for tracing.",
     )
+
+
+# ---------------------------------------------------------------------------
+# Web3ExecutionContext
+# ---------------------------------------------------------------------------
+
+
+class Web3ExecutionContext(_FrozenModel):
+    """Metadata for receipts that touch Web3.
+
+    Attached to Moat receipts for executions that involve on-chain
+    interactions — either inbound intents (from IRSB indexer) or
+    outbound contract calls (via Web3Adapter).
+
+    Example::
+
+        ctx = Web3ExecutionContext(
+            chain_id=11155111,
+            contract_address="0xD66A1e880AA3939CA066a9EA1dD37ad3d01D977c",
+            tx_hash="0xabc...",
+            block_number=12345,
+            direction="outbound",
+        )
+    """
+
+    chain_id: int = Field(
+        ..., description="EIP-155 chain ID (e.g. 11155111 for Sepolia)."
+    )
+    contract_address: str = Field(
+        default="", description="Target contract address (0x-prefixed)."
+    )
+    tx_hash: str = Field(
+        default="", description="Transaction hash (0x-prefixed hex, 66 chars)."
+    )
+    block_number: int = Field(default=0, description="Block number of the transaction.")
+    rpc_url_domain: str = Field(
+        default="", description="Domain of the RPC endpoint used."
+    )
+    direction: str = Field(
+        default="outbound",
+        description="Direction: 'outbound' (Moat→chain) or 'inbound' (chain→Moat).",
+    )
+    intent_hash: str = Field(
+        default="",
+        description="EIP-712 CIE intentId (0x-prefixed bytes32 hex).",
+    )

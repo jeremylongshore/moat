@@ -41,6 +41,7 @@ from moat_core.security_headers import SecurityHeadersMiddleware
 
 from app.config import settings
 from app.routers.tools import router as tools_router
+from app.tool_definitions import TOOL_SCHEMAS
 
 # Configure structured JSON logging before anything else writes to the log.
 configure_logging(level=settings.LOG_LEVEL, service_name=settings.SERVICE_NAME)
@@ -82,7 +83,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 # Application
 # ---------------------------------------------------------------------------
 
-_expose_docs = settings.MOAT_ENV in ("local", "test", "dev")
+_expose_interactive = settings.MOAT_ENV in ("local", "test", "dev")
 app = FastAPI(
     title="Moat MCP Server",
     description=(
@@ -93,11 +94,15 @@ app = FastAPI(
         "- `POST /tools/capabilities.search` - Search by name/description\n"
         "- `POST /tools/capabilities.execute` - Execute a capability\n"
         "- `POST /tools/capabilities.stats` - Get reliability stats\n"
+        "- `POST /tools/bounty.discover` - Search bounty platforms\n"
+        "- `POST /tools/bounty.triage` - Triage a GitHub issue via GWI\n"
+        "- `POST /tools/bounty.execute` - Execute a fix via GWI\n"
+        "- `POST /tools/bounty.status` - Composite status check\n"
     ),
     version="0.1.0",
-    docs_url="/docs" if _expose_docs else None,
-    redoc_url="/redoc" if _expose_docs else None,
-    openapi_url="/openapi.json" if _expose_docs else None,
+    openapi_url="/openapi.json",  # Always available — agents need schema discovery
+    docs_url="/docs" if _expose_interactive else None,
+    redoc_url="/redoc" if _expose_interactive else None,
     lifespan=lifespan,
 )
 
@@ -181,73 +186,17 @@ async def healthz() -> dict[str, str]:
 )
 async def list_tools() -> dict[str, object]:
     """Return a manifest of all available MCP tools and their descriptions."""
-    return {
-        "tools": [
+    tools = []
+    for schema in TOOL_SCHEMAS:
+        tools.append(
             {
-                "name": "capabilities.list",
-                "endpoint": "POST /tools/capabilities.list",
-                "description": (
-                    "List capabilities from the registry with optional filters"
-                ),
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "filter": {
-                            "type": "object",
-                            "properties": {
-                                "provider": {"type": "string"},
-                                "status": {
-                                    "type": "string",
-                                    "enum": ["active", "inactive", "deprecated"],
-                                },
-                                "verified": {"type": "boolean"},
-                            },
-                        }
-                    },
-                },
-            },
-            {
-                "name": "capabilities.search",
-                "endpoint": "POST /tools/capabilities.search",
-                "description": "Search capabilities by name, description, or tags",
-                "input_schema": {
-                    "type": "object",
-                    "required": ["query"],
-                    "properties": {"query": {"type": "string"}},
-                },
-            },
-            {
-                "name": "capabilities.execute",
-                "endpoint": "POST /tools/capabilities.execute",
-                "description": (
-                    "Execute a capability through the policy-enforced gateway"
-                ),
-                "input_schema": {
-                    "type": "object",
-                    "required": ["capability_id", "tenant_id"],
-                    "properties": {
-                        "capability_id": {"type": "string"},
-                        "params": {"type": "object"},
-                        "tenant_id": {"type": "string"},
-                        "idempotency_key": {"type": "string"},
-                        "scope": {"type": "string"},
-                    },
-                },
-            },
-            {
-                "name": "capabilities.stats",
-                "endpoint": "POST /tools/capabilities.stats",
-                "description": (
-                    "Get 7-day reliability stats and trust signals for a capability"
-                ),
-                "input_schema": {
-                    "type": "object",
-                    "required": ["capability_id"],
-                    "properties": {"capability_id": {"type": "string"}},
-                },
-            },
-        ]
-    }
+                "name": schema["name"],
+                "endpoint": f"POST /tools/{schema['name']}",
+                "description": schema["description"],
+                "input_schema": schema["input_schema"],
+            }
+        )
+    return {"tools": tools}
 
 
 @app.get("/", include_in_schema=False)

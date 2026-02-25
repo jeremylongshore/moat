@@ -8,7 +8,7 @@ successful Moat capability execution. These tests validate:
 
   - All five keccak256 hash functions produce 32-byte, deterministic output
   - _build_message_hash constructs the exact EVM-encoded preimage
-  - _sign_receipt_message produces valid 65-byte EIP-191 signatures
+  - _sign_receipt_eip712 produces valid 65-byte EIP-712 typed data signatures
   - post_irsb_receipt dry-run path: returns receipt with chain='dry_run'
   - Non-success moat receipts return None (no receipt posted)
   - Missing RPC URL falls back to chain='dry_run_no_rpc'
@@ -35,7 +35,7 @@ from unittest.mock import AsyncMock, patch
 from app.hooks.irsb_receipt import (
     _build_message_hash,
     _keccak256,
-    _sign_receipt_message,
+    _sign_receipt_eip712,
     _to_bytes32,
     compute_constraints_hash,
     compute_evidence_hash,
@@ -349,62 +349,106 @@ class TestBuildMessageHash:
 # ---------------------------------------------------------------------------
 
 
-class TestSignReceiptMessage:
-    """Tests for EIP-191 message signing.
+class TestSignReceiptEIP712:
+    """Tests for EIP-712 typed data signing.
 
     Uses Foundry's public test key so no real funds are at risk.
     """
 
+    def _sign(self, **overrides) -> bytes:
+        """Call _sign_receipt_eip712 with reasonable defaults, applying overrides."""
+        defaults = {
+            "intent_hash": _keccak256(b"intent"),
+            "constraints_hash": _keccak256(b"constraints"),
+            "route_hash": _keccak256(b"route"),
+            "outcome_hash": _keccak256(b"outcome"),
+            "evidence_hash": _keccak256(b"evidence"),
+            "created_at": 1_700_000_000,
+            "expiry": 1_700_086_400,
+            "solver_id": _to_bytes32("0x83Be08FFB22b61733eDf15b0ee9Caf5562cd888d"),
+            "private_key": _TEST_PRIVATE_KEY,
+        }
+        defaults.update(overrides)
+        return _sign_receipt_eip712(**defaults)
+
     def test_signature_is_65_bytes(self):
-        """EIP-191 personal_sign produces a 65-byte (r + s + v) signature."""
-        msg_hash = _keccak256(b"test message")
-        sig = _sign_receipt_message(msg_hash, _TEST_PRIVATE_KEY)
+        """EIP-712 typed data signing produces a 65-byte (r + s + v) signature."""
+        sig = self._sign()
         assert len(sig) == 65
 
     def test_signature_is_deterministic_for_same_key_and_message(self):
         """Same key + same message always produces the same signature."""
-        msg_hash = _keccak256(b"deterministic test")
-        sig1 = _sign_receipt_message(msg_hash, _TEST_PRIVATE_KEY)
-        sig2 = _sign_receipt_message(msg_hash, _TEST_PRIVATE_KEY)
+        sig1 = self._sign()
+        sig2 = self._sign()
         assert sig1 == sig2
 
-    def test_signature_differs_for_different_message(self):
-        """Different message → different signature."""
-        h1 = _keccak256(b"message-a")
-        h2 = _keccak256(b"message-b")
-        sig1 = _sign_receipt_message(h1, _TEST_PRIVATE_KEY)
-        sig2 = _sign_receipt_message(h2, _TEST_PRIVATE_KEY)
+    def test_signature_differs_for_different_intent_hash(self):
+        """Different intent hash → different signature."""
+        sig1 = self._sign(intent_hash=_keccak256(b"intent-a"))
+        sig2 = self._sign(intent_hash=_keccak256(b"intent-b"))
         assert sig1 != sig2
 
     def test_signature_is_verifiable_against_signer_address(self):
-        """The recovered address from the signature matches the test key's address."""
+        """Recovered address from EIP-712 sig matches the test key."""
         from eth_account import Account
-        from eth_account.messages import encode_defunct
+        from eth_account.messages import encode_typed_data
 
-        msg_hash = _keccak256(b"verify me")
-        sig = _sign_receipt_message(msg_hash, _TEST_PRIVATE_KEY)
+        from app.hooks.irsb_receipt import EIP712_DOMAIN
 
-        msg = encode_defunct(msg_hash)
-        recovered = Account.recover_message(msg, signature=sig)
+        sig = self._sign()
+
+        # Reconstruct the same typed data used for signing
+        typed_data = {
+            "types": {
+                "EIP712Domain": [
+                    {"name": "name", "type": "string"},
+                    {"name": "version", "type": "string"},
+                    {"name": "chainId", "type": "uint256"},
+                    {"name": "verifyingContract", "type": "address"},
+                ],
+                "IntentReceipt": [
+                    {"name": "intentHash", "type": "bytes32"},
+                    {"name": "constraintsHash", "type": "bytes32"},
+                    {"name": "routeHash", "type": "bytes32"},
+                    {"name": "outcomeHash", "type": "bytes32"},
+                    {"name": "evidenceHash", "type": "bytes32"},
+                    {"name": "createdAt", "type": "uint64"},
+                    {"name": "expiry", "type": "uint64"},
+                    {"name": "solverId", "type": "bytes32"},
+                ],
+            },
+            "primaryType": "IntentReceipt",
+            "domain": EIP712_DOMAIN,
+            "message": {
+                "intentHash": _keccak256(b"intent"),
+                "constraintsHash": _keccak256(b"constraints"),
+                "routeHash": _keccak256(b"route"),
+                "outcomeHash": _keccak256(b"outcome"),
+                "evidenceHash": _keccak256(b"evidence"),
+                "createdAt": 1_700_000_000,
+                "expiry": 1_700_086_400,
+                "solverId": _to_bytes32("0x83Be08FFB22b61733eDf15b0ee9Caf5562cd888d"),
+            },
+        }
+
+        structured = encode_typed_data(full_message=typed_data)
+        recovered = Account.recover_message(structured, signature=sig)
         assert recovered.lower() == _TEST_ADDRESS.lower()
 
     def test_signature_is_bytes_type(self):
-        """_sign_receipt_message returns raw bytes (not hex string)."""
-        msg_hash = _keccak256(b"type check")
-        sig = _sign_receipt_message(msg_hash, _TEST_PRIVATE_KEY)
+        """_sign_receipt_eip712 returns raw bytes (not hex string)."""
+        sig = self._sign()
         assert isinstance(sig, bytes)
 
     def test_v_byte_is_27_or_28_canonical(self):
-        """The final byte (v) of the signature must be 27 or 28 (canonical EIP-191)."""
-        msg_hash = _keccak256(b"v byte test")
-        sig = _sign_receipt_message(msg_hash, _TEST_PRIVATE_KEY)
+        """The final byte (v) of the signature must be 27 or 28 (canonical)."""
+        sig = self._sign()
         v = sig[-1]
         assert v in (27, 28), f"Expected v in {{27, 28}}, got {v}"
 
     def test_r_and_s_are_non_zero(self):
         """The r and s components of the signature should be non-zero."""
-        msg_hash = _keccak256(b"r s check")
-        sig = _sign_receipt_message(msg_hash, _TEST_PRIVATE_KEY)
+        sig = self._sign()
         r_bytes = sig[:32]
         s_bytes = sig[32:64]
         assert r_bytes != b"\x00" * 32

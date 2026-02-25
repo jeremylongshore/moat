@@ -30,6 +30,7 @@ COVERAGE_FLAGS := --cov=packages/core/moat_core --cov-report=term-missing --cov-
 
 # ── All package / service dirs for installs ───────────────────────────────────
 ALL_INSTALLABLE := packages/core \
+                   packages/cli \
                    services/control-plane \
                    services/gateway \
                    services/trust-plane \
@@ -130,7 +131,9 @@ typecheck:
 # ─────────────────────────────────────────────────────────────────────────────
 test:
 	@printf "$(BOLD)Running pytest...$(RESET)\n"
-	pytest $(PYTEST_FLAGS) packages/ services/
+	pytest $(PYTEST_FLAGS) packages/core/tests/
+	PYTHONPATH=services/control-plane pytest $(PYTEST_FLAGS) services/control-plane/tests/
+	PYTHONPATH=services/gateway pytest $(PYTEST_FLAGS) services/gateway/tests/
 
 test-coverage:
 	@printf "$(BOLD)Running pytest with coverage...$(RESET)\n"

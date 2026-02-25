@@ -88,7 +88,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 # Application
 # ---------------------------------------------------------------------------
 
-_expose_docs = settings.MOAT_ENV in ("local", "test", "dev")
+_expose_interactive = settings.MOAT_ENV in ("local", "test", "dev")
 app = FastAPI(
     title="Moat Control Plane",
     description=(
@@ -96,9 +96,9 @@ app = FastAPI(
         "Verified Agent Capabilities Marketplace."
     ),
     version="0.1.0",
-    docs_url="/docs" if _expose_docs else None,
-    redoc_url="/redoc" if _expose_docs else None,
-    openapi_url="/openapi.json" if _expose_docs else None,
+    openapi_url="/openapi.json",  # Always available — agents need schema discovery
+    docs_url="/docs" if _expose_interactive else None,
+    redoc_url="/redoc" if _expose_interactive else None,
     lifespan=lifespan,
 )
 

@@ -14,19 +14,18 @@ Every Moat execution produces two audit records:
 Both share the same intentId, enabling cross-reference between the off-chain
 audit log and the on-chain proof.
 
-Intent ID computation (PLACEHOLDER)
+Intent ID computation (EIP-712 CIE)
 ------------------------------------
-The intentId below is NOT a Canonical Intent Envelope (CIE) per 041-AT-SPEC.
-When IRSB Phase 1 (CIE) is built, this becomes a proper EIP-712 struct hash
-over all 12 CIE fields with CIE_TYPEHASH. For now, a deterministic hash
-that uniquely identifies this action.
-
-The placeholder maps to the same ``intentHash`` field in IntentReceipt on-chain,
-so upgrading is a hash computation change, not a schema change.
+The intentId is a Canonical Intent Envelope (CIE) per 041-AT-SPEC, computed
+as an EIP-712 struct hash over all CIE fields with CIE_TYPEHASH. This
+replaced the earlier placeholder keccak256(capability:input:tenant:timestamp).
 
 Signing
 -------
-MVP: Raw key signing via eth_account (key from env var or Docker secret).
+EIP-712 typed data signing via eth_account. Messages include the full
+EIP-712 domain separator for verifiable on-chain validation.
+
+MVP: Raw key signing (key from env var or Docker secret).
 Production: Cloud KMS via @irsb/kms-signer (no private keys in memory).
 
 Contract addresses (Sepolia Testnet)
@@ -54,6 +53,7 @@ logger = logging.getLogger(__name__)
 INTENT_RECEIPT_HUB = "0xD66A1e880AA3939CA066a9EA1dD37ad3d01D977c"
 SOLVER_ADDRESS = "0x83Be08FFB22b61733eDf15b0ee9Caf5562cd888d"
 CHAIN_ID = 11155111  # Sepolia
+AGENT_ID = 1319  # ERC-8004 Agent #1319 (intent-scout-001)
 
 SEPOLIA_RPC_URL = os.environ.get(
     "IRSB_RPC_URL",
@@ -121,6 +121,38 @@ RECEIPT_HUB_ABI = [
 
 
 # ---------------------------------------------------------------------------
+# EIP-712 Domain & CIE Type
+# ---------------------------------------------------------------------------
+
+# Canonical Intent Envelope EIP-712 type per 041-AT-SPEC
+CIE_TYPE_STRING = (
+    "CanonicalIntentEnvelope("
+    "uint8 version,"
+    "bytes32 tenantId,"
+    "address agentAddress,"
+    "uint256 agentId,"
+    "uint8 domain,"
+    "bytes32 actionHash,"
+    "bytes32 constraintsHash,"
+    "uint256 nonce,"
+    "uint64 timestamp,"
+    "uint64 expiry,"
+    "bytes32 extensionHash)"
+)
+
+EIP712_DOMAIN = {
+    "name": "MoatIntentReceipt",
+    "version": "1",
+    "chainId": CHAIN_ID,
+    "verifyingContract": INTENT_RECEIPT_HUB,
+}
+
+# Domain for Web2 capability executions
+CIE_DOMAIN_WEB2 = 0
+CIE_DOMAIN_WEB3 = 1
+
+
+# ---------------------------------------------------------------------------
 # Hash helpers
 # ---------------------------------------------------------------------------
 
@@ -143,25 +175,114 @@ def _sha256_hex(data: str) -> str:
     return "0x" + hashlib.sha256(data.encode()).hexdigest()
 
 
+def _string_to_bytes32(s: str) -> bytes:
+    """Convert a string to bytes32 (keccak256 hash)."""
+    return _keccak256(s.encode())
+
+
+# ---------------------------------------------------------------------------
+# CIE Intent Hash (EIP-712)
+# ---------------------------------------------------------------------------
+
+
+def compute_intent_hash_eip712(
+    capability_id: str,
+    input_hash: str,
+    tenant_id: str,
+    timestamp: str,
+    agent_address: str = SOLVER_ADDRESS,
+    agent_id: int = AGENT_ID,
+    domain: int = CIE_DOMAIN_WEB2,
+    nonce: int = 0,
+    expiry: int = 0,
+) -> bytes:
+    """Compute a CIE intentId using EIP-712 typed struct hash.
+
+    Maps to IntentReceipt.intentHash on-chain. Per 041-AT-SPEC:
+        intentId = keccak256(abi.encode(CIE_TYPEHASH, version, tenantId,
+            agentAddress, agentId, domain, actionHash, constraintsHash,
+            nonce, timestamp, expiry, extensionHash))
+    """
+    from eth_abi import encode
+    from web3 import Web3
+
+    cie_typehash = _keccak256(CIE_TYPE_STRING.encode())
+
+    # Map Moat fields to CIE fields
+    version = 1
+    tenant_id_bytes32 = _string_to_bytes32(tenant_id)
+    agent_addr = Web3.to_checksum_address(agent_address)
+    action_hash = _keccak256(f"{capability_id}:{input_hash}".encode())
+    constraints_hash = _string_to_bytes32(f"moat:policy:{tenant_id}:{capability_id}")
+    extension_hash = bytes(32)  # No extensions yet
+
+    # Parse timestamp (supports unix epoch or ISO-8601)
+    try:
+        if timestamp.isdigit():
+            ts_int = int(timestamp)
+        else:
+            from datetime import datetime
+
+            # Handle ISO-8601 strings like "2026-01-01T00:00:00Z"
+            dt = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+            ts_int = int(dt.timestamp())
+    except (ValueError, AttributeError):
+        ts_int = int(time.time())
+
+    if expiry == 0:
+        expiry = ts_int + 86400  # 24h default
+
+    encoded = encode(
+        [
+            "bytes32",  # CIE_TYPEHASH
+            "uint8",  # version
+            "bytes32",  # tenantId
+            "address",  # agentAddress
+            "uint256",  # agentId
+            "uint8",  # domain
+            "bytes32",  # actionHash
+            "bytes32",  # constraintsHash
+            "uint256",  # nonce
+            "uint64",  # timestamp
+            "uint64",  # expiry
+            "bytes32",  # extensionHash
+        ],
+        [
+            cie_typehash,
+            version,
+            tenant_id_bytes32,
+            agent_addr,
+            agent_id,
+            domain,
+            action_hash,
+            constraints_hash,
+            nonce,
+            ts_int,
+            expiry,
+            extension_hash,
+        ],
+    )
+    return _keccak256(encoded)
+
+
+# Keep old function name as alias for backwards compatibility
 def compute_intent_hash(
     capability_id: str,
     input_hash: str,
     tenant_id: str,
     timestamp: str,
 ) -> bytes:
-    """Compute a PLACEHOLDER intentId for the IRSB receipt.
+    """Compute the CIE intentId using EIP-712 struct hash.
 
-    This is NOT a Canonical Intent Envelope intentId per 041-AT-SPEC.
-    Real CIE computation requires:
-        intentId = keccak256(abi.encode(CIE_TYPEHASH, version, tenantId,
-            agentAddress, agentId, domain, actionHash, constraintsHash,
-            nonce, timestamp, expiry, extensionHash))
-
-    For now, a deterministic keccak256 hash that uniquely identifies this action.
-    When IRSB Phase 1 (CIE) is built, swap this computation only.
+    Upgraded from placeholder keccak256(cap:input:tenant:ts) to proper
+    EIP-712 CIE struct hash per 041-AT-SPEC.
     """
-    preimage = f"{capability_id}:{input_hash}:{tenant_id}:{timestamp}"
-    return _keccak256(preimage.encode())
+    return compute_intent_hash_eip712(
+        capability_id=capability_id,
+        input_hash=input_hash,
+        tenant_id=tenant_id,
+        timestamp=timestamp,
+    )
 
 
 def compute_result_hash(receipt: dict[str, Any]) -> bytes:
@@ -191,32 +312,76 @@ def compute_route_hash(receipt: dict[str, Any]) -> bytes:
 
 def compute_evidence_hash(receipt: dict[str, Any]) -> bytes:
     """Hash the evidence bundle (full Moat receipt for audit)."""
-    # The entire Moat receipt is the evidence for this execution.
     evidence = json.dumps(receipt, sort_keys=True, default=str)
     return _keccak256(evidence.encode())
 
 
 # ---------------------------------------------------------------------------
-# Signing
+# Signing (EIP-712 typed data)
 # ---------------------------------------------------------------------------
 
 
-def _sign_receipt_message(
-    message_hash: bytes,
+def _sign_receipt_eip712(
+    intent_hash: bytes,
+    constraints_hash: bytes,
+    route_hash: bytes,
+    outcome_hash: bytes,
+    evidence_hash: bytes,
+    created_at: int,
+    expiry: int,
+    solver_id: bytes,
     private_key: str,
 ) -> bytes:
-    """Sign a message hash using eth_account (EIP-191 personal_sign).
+    """Sign a receipt using EIP-712 typed data signing.
+
+    Upgraded from EIP-191 personal_sign to EIP-712 encode_typed_data for
+    proper on-chain verification via ecrecover with domain separator.
 
     Returns 65-byte signature: r (32) + s (32) + v (1).
     """
     from eth_account import Account
-    from eth_account.messages import encode_defunct
+    from eth_account.messages import encode_typed_data
 
-    msg = encode_defunct(message_hash)
-    signed = Account.sign_message(msg, private_key=private_key)
+    # Build the EIP-712 typed data structure
+    typed_data = {
+        "types": {
+            "EIP712Domain": [
+                {"name": "name", "type": "string"},
+                {"name": "version", "type": "string"},
+                {"name": "chainId", "type": "uint256"},
+                {"name": "verifyingContract", "type": "address"},
+            ],
+            "IntentReceipt": [
+                {"name": "intentHash", "type": "bytes32"},
+                {"name": "constraintsHash", "type": "bytes32"},
+                {"name": "routeHash", "type": "bytes32"},
+                {"name": "outcomeHash", "type": "bytes32"},
+                {"name": "evidenceHash", "type": "bytes32"},
+                {"name": "createdAt", "type": "uint64"},
+                {"name": "expiry", "type": "uint64"},
+                {"name": "solverId", "type": "bytes32"},
+            ],
+        },
+        "primaryType": "IntentReceipt",
+        "domain": EIP712_DOMAIN,
+        "message": {
+            "intentHash": intent_hash,
+            "constraintsHash": constraints_hash,
+            "routeHash": route_hash,
+            "outcomeHash": outcome_hash,
+            "evidenceHash": evidence_hash,
+            "createdAt": created_at,
+            "expiry": expiry,
+            "solverId": solver_id,
+        },
+    }
+
+    structured = encode_typed_data(full_message=typed_data)
+    signed = Account.sign_message(structured, private_key=private_key)
     return signed.signature
 
 
+# Keep the old function name for the legacy message hash path
 def _build_message_hash(
     chain_id: int,
     contract_address: str,
@@ -304,11 +469,8 @@ async def _submit_on_chain(
     # Read current solver nonce from contract
     current_nonce = contract.functions.solverNonces(solver_id).call()
 
-    # Build and sign the message hash
-    msg_hash = _build_message_hash(
-        chain_id=CHAIN_ID,
-        contract_address=INTENT_RECEIPT_HUB,
-        nonce=current_nonce,
+    # Sign with EIP-712 typed data
+    solver_sig = _sign_receipt_eip712(
         intent_hash=intent_hash,
         constraints_hash=constraints_hash,
         route_hash=route_hash,
@@ -317,9 +479,8 @@ async def _submit_on_chain(
         created_at=created_at,
         expiry=expiry,
         solver_id=solver_id,
+        private_key=SOLVER_PRIVATE_KEY,
     )
-
-    solver_sig = _sign_receipt_message(msg_hash, SOLVER_PRIVATE_KEY)
 
     # Build the receipt tuple
     receipt_tuple = (
@@ -444,17 +605,21 @@ async def post_irsb_receipt(moat_receipt: dict[str, Any]) -> dict[str, Any] | No
         "moat_receipt_id": moat_receipt["receipt_id"],
         "tenant_id": moat_receipt["tenant_id"],
         "timestamp": moat_receipt.get("executed_at"),
+        "signing_method": "eip712",
+        "cie_version": 1,
+        "agent_id": AGENT_ID,
     }
 
     if DRY_RUN:
         irsb_receipt["chain"] = "dry_run"
         logger.info(
-            "IRSB receipt (dry-run, not submitted on-chain)",
+            "IRSB receipt (dry-run, EIP-712 CIE, not submitted on-chain)",
             extra={
                 "intent_hash": "0x" + intent_hash.hex(),
                 "outcome_hash": "0x" + outcome_hash.hex(),
                 "moat_receipt_id": moat_receipt["receipt_id"],
                 "capability_id": moat_receipt["capability_id"],
+                "signing_method": "eip712",
             },
         )
         return irsb_receipt
@@ -497,7 +662,7 @@ async def post_irsb_receipt(moat_receipt: dict[str, Any]) -> dict[str, Any] | No
         irsb_receipt["gas_used"] = chain_result["gas_used"]
 
         logger.info(
-            "IRSB receipt submitted on-chain",
+            "IRSB receipt submitted on-chain (EIP-712 CIE)",
             extra={
                 "tx_hash": chain_result["tx_hash"],
                 "receipt_id": chain_result["receipt_id"],
@@ -505,6 +670,7 @@ async def post_irsb_receipt(moat_receipt: dict[str, Any]) -> dict[str, Any] | No
                 "gas": chain_result["gas_used"],
                 "intent_hash": "0x" + intent_hash.hex(),
                 "moat_receipt_id": moat_receipt["receipt_id"],
+                "signing_method": "eip712",
             },
         )
         return irsb_receipt

@@ -86,6 +86,7 @@ from moat_core.models import (
     PolicyDecision,
     Receipt,
     RiskClass,
+    Web3ExecutionContext,
 )
 
 # --- Policy engine ----------------------------------------------------------
@@ -113,6 +114,7 @@ __all__: list[str] = [
     "PolicyDecision",
     "Receipt",
     "RiskClass",
+    "Web3ExecutionContext",
     # Errors
     "AdapterError",
     "BudgetExceededError",

@@ -50,6 +50,7 @@ trap cleanup SIGINT SIGTERM
 # ── Install all packages in editable mode ────────────────────────────────────
 log "Installing packages in editable mode..."
 pip install -e "${ROOT_DIR}/packages/core"       --quiet
+pip install -e "${ROOT_DIR}/packages/cli"        --quiet
 pip install -e "${ROOT_DIR}/services/control-plane" --quiet
 pip install -e "${ROOT_DIR}/services/gateway"    --quiet
 pip install -e "${ROOT_DIR}/services/trust-plane" --quiet

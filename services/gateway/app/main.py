@@ -29,6 +29,7 @@ from moat_core.logging import configure_logging
 from moat_core.security_headers import SecurityHeadersMiddleware
 
 from app.config import settings
+from app.intent_listener import router as intent_router
 from app.middleware import RedactionMiddleware, RequestIDMiddleware
 from app.routers.execute import router as execute_router
 
@@ -103,6 +104,32 @@ def _seed_policy_bundles() -> None:
             allowed_scopes=["execute"],
             budget_daily=5000,  # $50/day (50 calls)
             domain_allowlist=["sepolia.infura.io"],
+        ),
+        # Web3 contract interactions (via Web3Adapter)
+        PolicyBundle(
+            id="pb_automaton_contract_read",
+            tenant_id=tenant,
+            capability_id="contract.read",
+            allowed_scopes=["execute"],
+            budget_daily=5000,  # $50/day
+            domain_allowlist=[
+                "eth-mainnet.g.alchemy.com",
+                "polygon-mainnet.g.alchemy.com",
+                "arb-mainnet.g.alchemy.com",
+                "opt-mainnet.g.alchemy.com",
+                "sepolia.infura.io",
+                "api.thegraph.com",
+            ],
+        ),
+        PolicyBundle(
+            id="pb_automaton_contract_write",
+            tenant_id=tenant,
+            capability_id="contract.write",
+            allowed_scopes=["execute"],
+            budget_daily=1000,  # $10/day — testnet only for now
+            domain_allowlist=[
+                "sepolia.infura.io",
+            ],
         ),
         # Generic HTTPS proxy — bounty discovery across all platforms
         PolicyBundle(
@@ -190,7 +217,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 # Application
 # ---------------------------------------------------------------------------
 
-_expose_docs = settings.MOAT_ENV in ("local", "test", "dev")
+_expose_interactive = settings.MOAT_ENV in ("local", "test", "dev")
 app = FastAPI(
     title="Moat Gateway",
     description=(
@@ -198,9 +225,9 @@ app = FastAPI(
         "Verified Agent Capabilities Marketplace."
     ),
     version="0.1.0",
-    docs_url="/docs" if _expose_docs else None,
-    redoc_url="/redoc" if _expose_docs else None,
-    openapi_url="/openapi.json" if _expose_docs else None,
+    openapi_url="/openapi.json",  # Always available — agents need schema discovery
+    docs_url="/docs" if _expose_interactive else None,
+    redoc_url="/redoc" if _expose_interactive else None,
     lifespan=lifespan,
 )
 
@@ -250,6 +277,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 # ---------------------------------------------------------------------------
 
 app.include_router(execute_router)
+app.include_router(intent_router)
 
 
 @app.get("/healthz", tags=["ops"], summary="Health check")

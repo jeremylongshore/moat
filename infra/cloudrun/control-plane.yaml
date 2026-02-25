@@ -1,0 +1,57 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: moat-control-plane
+  labels:
+    app: moat
+    component: control-plane
+  annotations:
+    run.googleapis.com/ingress: internal-and-cloud-load-balancing
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "5"
+        run.googleapis.com/cloudsql-instances: "irsb-protocol:us-central1:moat-db"
+        run.googleapis.com/cpu-throttling: "false"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 30
+      containers:
+        - image: us-docker.pkg.dev/irsb-protocol/moat/control-plane:latest
+          ports:
+            - containerPort: 8001
+          env:
+            - name: MOAT_ENV
+              value: production
+            - name: PORT
+              value: "8001"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: moat-db-url
+                  key: latest
+            - name: MOAT_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: moat-jwt-secret
+                  key: latest
+            - name: MOAT_AUTH_DISABLED
+              value: "false"
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8001
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8001
+            periodSeconds: 15

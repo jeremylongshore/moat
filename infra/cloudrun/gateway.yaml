@@ -1,0 +1,82 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: moat-gateway
+  labels:
+    app: moat
+    component: gateway
+  annotations:
+    run.googleapis.com/ingress: internal-and-cloud-load-balancing
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "1"
+        autoscaling.knative.dev/maxScale: "10"
+        run.googleapis.com/cloudsql-instances: "irsb-protocol:us-central1:moat-db"
+        run.googleapis.com/cpu-throttling: "false"
+    spec:
+      containerConcurrency: 80
+      timeoutSeconds: 120
+      containers:
+        - image: us-docker.pkg.dev/irsb-protocol/moat/gateway:latest
+          ports:
+            - containerPort: 8002
+          env:
+            - name: MOAT_ENV
+              value: production
+            - name: PORT
+              value: "8002"
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: moat-db-url
+                  key: latest
+            - name: MOAT_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: moat-jwt-secret
+                  key: latest
+            - name: MOAT_AUTH_DISABLED
+              value: "false"
+            - name: CONTROL_PLANE_URL
+              value: https://moat-control-plane-xxxxxxxxxx.run.app
+            - name: TRUST_PLANE_URL
+              value: https://moat-trust-plane-xxxxxxxxxx.run.app
+            - name: IRSB_DRY_RUN
+              value: "false"
+            - name: IRSB_RPC_URL
+              valueFrom:
+                secretKeyRef:
+                  name: irsb-rpc-url
+                  key: latest
+            - name: IRSB_SOLVER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: irsb-solver-key
+                  key: latest
+            - name: SLACK_BOT_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: slack-bot-token
+                  key: latest
+            - name: HTTP_PROXY_DOMAIN_ALLOWLIST
+              value: "api.github.com,console.algora.io,gitcoin.co,api.polar.sh,api.hackerone.com,api.bugcrowd.com,api.thegraph.com,eth-mainnet.g.alchemy.com,polygon-mainnet.g.alchemy.com,arb-mainnet.g.alchemy.com,opt-mainnet.g.alchemy.com"
+            - name: WEB3_RPC_DOMAIN_ALLOWLIST
+              value: "sepolia.infura.io,eth-mainnet.g.alchemy.com,polygon-mainnet.g.alchemy.com,arb-mainnet.g.alchemy.com,opt-mainnet.g.alchemy.com,api.thegraph.com"
+          resources:
+            limits:
+              cpu: "2"
+              memory: 1Gi
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8002
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8002
+            periodSeconds: 15

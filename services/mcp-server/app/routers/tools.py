@@ -46,6 +46,9 @@ from pydantic import BaseModel, Field
 from app.http_client import (
     cp_list_capabilities,
     gw_execute,
+    gw_execute_bounty_discover,
+    gw_execute_gwi_command,
+    gw_execute_gwi_triage,
     tp_get_stats,
 )
 
@@ -311,3 +314,170 @@ async def tool_capabilities_stats(
         },
     )
     return _response("capabilities.stats", result, request)
+
+
+# ---------------------------------------------------------------------------
+# bounty.discover
+# ---------------------------------------------------------------------------
+
+
+class BountyDiscoverRequest(BaseModel):
+    platform: str = Field(default="algora", description="Bounty platform to search")
+    query: str = Field(default="", description="Search query")
+    language: str | None = Field(
+        default=None, description="Programming language filter"
+    )
+    min_reward_usd: float | None = Field(
+        default=None, description="Minimum reward in USD"
+    )
+    max_results: int = Field(default=20, description="Maximum results to return")
+
+
+@router.post(
+    "/bounty.discover",
+    response_model=ToolResponse,
+    summary="Search bounty platforms for open issues",
+)
+async def tool_bounty_discover(
+    body: BountyDiscoverRequest,
+    request: Request,
+    tenant_id: Annotated[str, Depends(get_current_tenant)],
+) -> ToolResponse:
+    """Search bounty platforms (Algora, Gitcoin, Polar, GitHub) for funded bounties."""
+    result = await gw_execute_bounty_discover(
+        platform=body.platform,
+        query=body.query,
+        language=body.language,
+        max_results=body.max_results,
+        tenant_id=tenant_id,
+    )
+    logger.info(
+        "Tool: bounty.discover",
+        extra={"platform": body.platform, "query": body.query},
+    )
+    return _response("bounty.discover", result, request)
+
+
+# ---------------------------------------------------------------------------
+# bounty.triage
+# ---------------------------------------------------------------------------
+
+
+class BountyTriageRequest(BaseModel):
+    url: str = Field(..., description="GitHub issue or PR URL")
+
+
+@router.post(
+    "/bounty.triage",
+    response_model=ToolResponse,
+    summary="Triage a GitHub issue via GWI",
+)
+async def tool_bounty_triage(
+    body: BountyTriageRequest,
+    request: Request,
+    tenant_id: Annotated[str, Depends(get_current_tenant)],
+) -> ToolResponse:
+    """Triage a GitHub issue using GWI triage.
+
+    Returns complexity score and assessment.
+    """
+    result = await gw_execute_gwi_triage(url=body.url, tenant_id=tenant_id)
+    logger.info(
+        "Tool: bounty.triage",
+        extra={"url": body.url},
+    )
+    return _response(
+        "bounty.triage",
+        {"url": body.url, "command": "triage", "gateway_receipt": result},
+        request,
+    )
+
+
+# ---------------------------------------------------------------------------
+# bounty.execute
+# ---------------------------------------------------------------------------
+
+
+class BountyExecuteRequest(BaseModel):
+    url: str = Field(..., description="GitHub issue URL to fix")
+    command: str = Field(
+        default="issue-to-code",
+        description="GWI command: issue-to-code or resolve",
+    )
+
+
+@router.post(
+    "/bounty.execute",
+    response_model=ToolResponse,
+    summary="Execute a fix via GWI",
+)
+async def tool_bounty_execute(
+    body: BountyExecuteRequest,
+    request: Request,
+    tenant_id: Annotated[str, Depends(get_current_tenant)],
+) -> ToolResponse:
+    """Execute a GitHub issue fix using GWI issue-to-code or resolve."""
+    result = await gw_execute_gwi_command(
+        url=body.url,
+        command=body.command,
+        tenant_id=tenant_id,
+    )
+    logger.info(
+        "Tool: bounty.execute",
+        extra={"url": body.url, "command": body.command},
+    )
+    return _response(
+        "bounty.execute",
+        {"url": body.url, "command": body.command, "gateway_receipt": result},
+        request,
+    )
+
+
+# ---------------------------------------------------------------------------
+# bounty.status
+# ---------------------------------------------------------------------------
+
+
+class BountyStatusRequest(BaseModel):
+    url: str = Field(..., description="GitHub issue URL to check status for")
+    capability_id: str = Field(
+        default="gwi.triage", description="Capability ID for stats"
+    )
+
+
+@router.post(
+    "/bounty.status",
+    response_model=ToolResponse,
+    summary="Composite bounty status check",
+)
+async def tool_bounty_status(
+    body: BountyStatusRequest,
+    request: Request,
+    tenant_id: Annotated[str, Depends(get_current_tenant)],
+) -> ToolResponse:
+    """Check bounty execution status: triage score + trust stats + IRSB receipt."""
+    import asyncio
+
+    stats_task = asyncio.create_task(tp_get_stats(body.capability_id))
+    triage_task = asyncio.create_task(
+        gw_execute_gwi_triage(url=body.url, tenant_id=tenant_id)
+    )
+
+    stats, triage = await asyncio.gather(
+        stats_task, triage_task, return_exceptions=True
+    )
+
+    result = {
+        "url": body.url,
+        "trust_stats": stats
+        if not isinstance(stats, Exception)
+        else {"error": str(stats)},
+        "triage_result": triage
+        if not isinstance(triage, Exception)
+        else {"error": str(triage)},
+    }
+    logger.info(
+        "Tool: bounty.status",
+        extra={"url": body.url, "capability_id": body.capability_id},
+    )
+    return _response("bounty.status", result, request)
