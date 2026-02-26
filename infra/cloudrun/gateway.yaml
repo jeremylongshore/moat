@@ -61,9 +61,9 @@ spec:
                   name: slack-bot-token
                   key: latest
             - name: HTTP_PROXY_DOMAIN_ALLOWLIST
-              value: "api.github.com,console.algora.io,gitcoin.co,api.polar.sh,api.hackerone.com,api.bugcrowd.com,api.thegraph.com,eth-mainnet.g.alchemy.com,polygon-mainnet.g.alchemy.com,arb-mainnet.g.alchemy.com,opt-mainnet.g.alchemy.com"
+              value: "api.github.com,console.algora.io,gitcoin.co,api.polar.sh,api.hackerone.com,api.bugcrowd.com,api.thegraph.com,eth-sepolia.g.alchemy.com,base-sepolia.g.alchemy.com,eth-mainnet.g.alchemy.com,base-mainnet.g.alchemy.com,polygon-mainnet.g.alchemy.com,arb-mainnet.g.alchemy.com,opt-mainnet.g.alchemy.com"
             - name: WEB3_RPC_DOMAIN_ALLOWLIST
-              value: "sepolia.infura.io,eth-mainnet.g.alchemy.com,polygon-mainnet.g.alchemy.com,arb-mainnet.g.alchemy.com,opt-mainnet.g.alchemy.com,api.thegraph.com"
+              value: "eth-sepolia.g.alchemy.com,base-sepolia.g.alchemy.com,eth-mainnet.g.alchemy.com,base-mainnet.g.alchemy.com,polygon-mainnet.g.alchemy.com,arb-mainnet.g.alchemy.com,opt-mainnet.g.alchemy.com,sepolia.infura.io,api.thegraph.com"
           resources:
             limits:
               cpu: "2"

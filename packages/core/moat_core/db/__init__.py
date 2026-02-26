@@ -14,6 +14,7 @@ Usage::
 
 from moat_core.db.base import Base, create_engine, create_session_factory, init_tables
 from moat_core.db.models import (
+    AgentRow,
     CapabilityRow,
     ConnectionRow,
     IdempotencyCacheRow,
@@ -23,6 +24,7 @@ from moat_core.db.models import (
 )
 
 __all__ = [
+    "AgentRow",
     "Base",
     "CapabilityRow",
     "ConnectionRow",

@@ -178,6 +178,46 @@ TOOL_SCHEMAS: list[dict[str, Any]] = [
             },
         },
     },
+    # ── A2A Discovery tools ──────────────────────────────────────────────
+    {
+        "name": "agents.discover",
+        "description": (
+            "List all known agents in the Moat ecosystem. Returns A2A AgentCards "
+            "with skills, capabilities, and connection details. Optionally filter "
+            "by skill tag."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "skill_tag": {
+                    "type": "string",
+                    "description": (
+                        "Filter agents by skill tag (e.g. 'execute', 'trust')"
+                    ),
+                },
+            },
+        },
+    },
+    {
+        "name": "agents.card",
+        "description": (
+            "Get the A2A AgentCard for a specific agent by name. Returns full "
+            "details including skills, authentication requirements, and capabilities."
+        ),
+        "input_schema": {
+            "type": "object",
+            "required": ["agent_name"],
+            "properties": {
+                "agent_name": {
+                    "type": "string",
+                    "description": (
+                        "Agent name (e.g. 'moat-gateway', 'moat-mcp-server', "
+                        "'moat-control-plane', 'moat-trust-plane')"
+                    ),
+                },
+            },
+        },
+    },
 ]
 
 

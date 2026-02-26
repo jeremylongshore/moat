@@ -403,6 +403,130 @@ class PolicyDecision(_FrozenModel):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# A2A Protocol Models (Agent-to-Agent v0.3.0)
+# ---------------------------------------------------------------------------
+
+
+class AgentSkill(_FrozenModel):
+    """A single skill advertised by an agent in its AgentCard."""
+
+    id: str = Field(..., min_length=1, description="Unique skill identifier.")
+    name: str = Field(..., min_length=1, description="Human-readable skill name.")
+    description: str = Field(default="", description="What this skill does.")
+    tags: list[str] = Field(default_factory=list, description="Searchable tags.")
+    examples: list[str] = Field(
+        default_factory=list,
+        description="Example natural-language queries this skill handles.",
+    )
+
+
+class AgentProvider(_FrozenModel):
+    """Organization or individual that published an agent."""
+
+    organization: str = Field(..., min_length=1)
+    url: str = Field(default="")
+
+
+class AgentCapabilities(_FrozenModel):
+    """What the agent supports in A2A interactions."""
+
+    streaming: bool = Field(default=False)
+    push_notifications: bool = Field(default=False)
+    state_transition_history: bool = Field(default=False)
+
+
+class AgentCard(_FrozenModel):
+    """A2A v0.3.0 AgentCard — the discovery document for an agent.
+
+    Served at ``/.well-known/agent.json`` per the A2A spec.
+
+    Example::
+
+        card = AgentCard(
+            name="moat-gateway",
+            description="Policy-enforced execution gateway for AI agents.",
+            url="http://localhost:8002",
+            provider=AgentProvider(organization="Moat"),
+            version="0.1.0",
+            skills=[AgentSkill(id="execute", name="Execute Capability")],
+        )
+    """
+
+    name: str = Field(..., min_length=1, description="Agent display name.")
+    description: str = Field(default="", description="What this agent does.")
+    url: str = Field(..., min_length=1, description="Base URL of the agent.")
+    provider: AgentProvider = Field(
+        default_factory=lambda: AgentProvider(organization="Moat"),
+    )
+    version: str = Field(default="0.1.0", description="Agent version string.")
+    documentation_url: str = Field(default="", description="Link to docs.")
+    capabilities: AgentCapabilities = Field(default_factory=AgentCapabilities)
+    authentication: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Auth requirements (e.g. {'schemes': ['bearer']}).",
+    )
+    default_input_modes: list[str] = Field(
+        default_factory=lambda: ["application/json"],
+    )
+    default_output_modes: list[str] = Field(
+        default_factory=lambda: ["application/json"],
+    )
+    skills: list[AgentSkill] = Field(
+        default_factory=list,
+        description="Skills this agent exposes to other agents.",
+    )
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
+class A2ATaskStatus(StrEnum):
+    """Lifecycle states for an A2A task."""
+
+    SUBMITTED = "submitted"
+    WORKING = "working"
+    INPUT_REQUIRED = "input-required"
+    COMPLETED = "completed"
+    CANCELED = "canceled"
+    FAILED = "failed"
+
+
+class A2AMessage(_FrozenModel):
+    """A single message in an A2A task conversation."""
+
+    role: str = Field(..., description="'user' or 'agent'.")
+    parts: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Message parts (text, file, data).",
+    )
+    timestamp: datetime = Field(default_factory=_utcnow)
+
+
+class A2AArtifact(_FrozenModel):
+    """An artifact produced by an A2A task."""
+
+    name: str = Field(default="", description="Artifact name.")
+    description: str = Field(default="")
+    parts: list[dict[str, Any]] = Field(default_factory=list)
+    index: int = Field(default=0)
+
+
+class A2ATask(_FrozenModel):
+    """An A2A task representing a unit of work between agents.
+
+    Follows the A2A task lifecycle: submitted → working → completed/failed.
+    """
+
+    id: str = Field(default_factory=_new_uuid, description="Task UUID.")
+    session_id: str = Field(default_factory=_new_uuid, description="Session grouping.")
+    status: A2ATaskStatus = Field(default=A2ATaskStatus.SUBMITTED)
+    messages: list[A2AMessage] = Field(default_factory=list)
+    artifacts: list[A2AArtifact] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=_utcnow)
+    updated_at: datetime = Field(default_factory=_utcnow)
+
+
 class Web3ExecutionContext(_FrozenModel):
     """Metadata for receipts that touch Web3.
 

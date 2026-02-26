@@ -163,6 +163,63 @@ class PolicyBundleRow(Base):
     )
 
 
+class AgentRow(Base):
+    """Registered agent in the control-plane agent registry.
+
+    Supports A2A AgentCard fields plus ERC-8004 on-chain identity.
+    """
+
+    __tablename__ = "agents"
+
+    agent_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    description: Mapped[str] = mapped_column(Text, default="")
+    url: Mapped[str] = mapped_column(String(512), nullable=False)
+    version: Mapped[str] = mapped_column(String(32), default="0.1.0")
+    provider_org: Mapped[str] = mapped_column(String(128), default="Moat")
+    skills: Mapped[list] = mapped_column(JSON, default=list)
+    capabilities_meta: Mapped[dict] = mapped_column(JSON, default=dict)
+    authentication: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[str] = mapped_column(String(16), default="active", index=True)
+    owner_tenant_id: Mapped[str | None] = mapped_column(
+        String(128), nullable=True, index=True
+    )
+    # ERC-8004 on-chain identity fields
+    erc8004_agent_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    erc8004_chain_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    erc8004_registry_address: Mapped[str | None] = mapped_column(
+        String(42), nullable=True
+    )
+    erc8004_agent_uri: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # SPIFFE workload identity (future)
+    spiffe_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+
+    def to_dict(self) -> dict:
+        return {
+            "agent_id": self.agent_id,
+            "name": self.name,
+            "description": self.description,
+            "url": self.url,
+            "version": self.version,
+            "provider_org": self.provider_org,
+            "skills": self.skills or [],
+            "capabilities": self.capabilities_meta or {},
+            "authentication": self.authentication or {},
+            "status": self.status,
+            "owner_tenant_id": self.owner_tenant_id,
+            "erc8004_agent_id": self.erc8004_agent_id,
+            "erc8004_chain_id": self.erc8004_chain_id,
+            "erc8004_registry_address": (self.erc8004_registry_address),
+            "erc8004_agent_uri": self.erc8004_agent_uri,
+            "spiffe_id": self.spiffe_id,
+            "created_at": (self.created_at.isoformat() if self.created_at else ""),
+        }
+
+
 class IdempotencyCacheRow(Base):
     """Idempotency cache entry mapping (tenant, key) to a receipt."""
 

@@ -50,10 +50,14 @@ logger = logging.getLogger(__name__)
 # Configuration
 # ---------------------------------------------------------------------------
 
-INTENT_RECEIPT_HUB = "0xD66A1e880AA3939CA066a9EA1dD37ad3d01D977c"
-SOLVER_ADDRESS = "0x83Be08FFB22b61733eDf15b0ee9Caf5562cd888d"
-CHAIN_ID = 11155111  # Sepolia
-AGENT_ID = 1319  # ERC-8004 Agent #1319 (intent-scout-001)
+INTENT_RECEIPT_HUB = os.environ.get(
+    "IRSB_INTENT_RECEIPT_HUB", "0xD66A1e880AA3939CA066a9EA1dD37ad3d01D977c"
+)
+SOLVER_ADDRESS = os.environ.get(
+    "SCOUT_SOLVER_ADDRESS", "0x83Be08FFB22b61733eDf15b0ee9Caf5562cd888d"
+)
+CHAIN_ID = int(os.environ.get("IRSB_CHAIN_ID", "11155111"))  # Sepolia
+AGENT_ID = int(os.environ.get("SCOUT_AGENT_ID", "1319"))  # ERC-8004 Agent
 
 SEPOLIA_RPC_URL = os.environ.get(
     "IRSB_RPC_URL",

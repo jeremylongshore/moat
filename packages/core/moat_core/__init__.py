@@ -77,6 +77,14 @@ from moat_core.logging import SENSITIVE_KEYS, JsonFormatter, configure_logging
 
 # --- Models & enumerations --------------------------------------------------
 from moat_core.models import (
+    A2AArtifact,
+    A2AMessage,
+    A2ATask,
+    A2ATaskStatus,
+    AgentCapabilities,
+    AgentCard,
+    AgentProvider,
+    AgentSkill,
     CapabilityManifest,
     CapabilityStatus,
     ErrorTaxonomy,
@@ -105,6 +113,14 @@ from moat_core.security_headers import SecurityHeadersMiddleware
 
 __all__: list[str] = [
     # Models
+    "A2AArtifact",
+    "A2AMessage",
+    "A2ATask",
+    "A2ATaskStatus",
+    "AgentCapabilities",
+    "AgentCard",
+    "AgentProvider",
+    "AgentSkill",
     "CapabilityManifest",
     "CapabilityStatus",
     "ErrorTaxonomy",

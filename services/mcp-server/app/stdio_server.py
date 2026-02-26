@@ -159,6 +159,13 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
     if name == "bounty.status":
         return _text(await _handle_bounty_status(arguments, tenant))
 
+    # ── A2A Discovery tools ─────────────────────────────────────────
+    if name == "agents.discover":
+        return _text(await _handle_agents_discover(arguments))
+
+    if name == "agents.card":
+        return _text(await _handle_agents_card(arguments))
+
     return _text({"error": f"Unknown tool: {name}"})
 
 
@@ -287,6 +294,47 @@ async def _handle_bounty_status(args: dict[str, Any], tenant: str) -> dict[str, 
         if not isinstance(triage, Exception)
         else {"error": str(triage)},
     }
+
+
+# ---------------------------------------------------------------------------
+# A2A Discovery handlers
+# ---------------------------------------------------------------------------
+
+
+async def _handle_agents_discover(args: dict[str, Any]) -> dict[str, Any]:
+    """List all known agents, optionally filtered by skill tag."""
+    from app.routers.discovery import AGENT_CARDS
+
+    agents = list(AGENT_CARDS.values())
+    skill_tag = args.get("skill_tag")
+
+    if skill_tag:
+        tag_lower = skill_tag.lower()
+        agents = [
+            agent
+            for agent in agents
+            if any(
+                tag_lower in tag
+                for skill in agent.get("skills", [])
+                for tag in skill.get("tags", [])
+            )
+        ]
+
+    return {"agents": agents, "total": len(agents)}
+
+
+async def _handle_agents_card(args: dict[str, Any]) -> dict[str, Any]:
+    """Get the AgentCard for a specific agent."""
+    from app.routers.discovery import AGENT_CARDS
+
+    agent_name = args.get("agent_name", "")
+    card = AGENT_CARDS.get(agent_name)
+    if card is None:
+        return {
+            "error": f"Agent '{agent_name}' not found",
+            "known_agents": list(AGENT_CARDS.keys()),
+        }
+    return card
 
 
 # ---------------------------------------------------------------------------

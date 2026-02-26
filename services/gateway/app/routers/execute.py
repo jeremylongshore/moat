@@ -29,6 +29,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request,
 from moat_core.auth import get_current_tenant
 from pydantic import BaseModel, Field
 
+from app.adapters.a2a_proxy import A2AProxyAdapter
 from app.adapters.base import registry as adapter_registry
 from app.adapters.http_proxy import HttpProxyAdapter
 from app.adapters.local_cli import LocalCLIAdapter
@@ -49,6 +50,7 @@ adapter_registry.register(LocalCLIAdapter())
 adapter_registry.register(OpenAIAdapter())
 adapter_registry.register(HttpProxyAdapter())
 adapter_registry.register(Web3Adapter())
+adapter_registry.register(A2AProxyAdapter())
 
 logger = logging.getLogger(__name__)
 

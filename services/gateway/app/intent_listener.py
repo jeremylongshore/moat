@@ -46,16 +46,78 @@ router = APIRouter(prefix="/intents", tags=["web3-bridge"])
 # Agent address → tenant mapping
 # ---------------------------------------------------------------------------
 
-# Known agent addresses that are authorized to submit intents.
-# Production: this would be a DB lookup or control-plane API call.
-_AGENT_TENANT_MAP: dict[str, str] = {
-    "0x83Be08FFB22b61733eDf15b0ee9Caf5562cd888d".lower(): "automaton",
+# Fallback mapping for known addresses when control-plane is unreachable.
+# Loaded from env: INTENT_FALLBACK_TENANTS="0xAddr1:tenant1,0xAddr2:tenant2"
+import os as _os
+
+_raw_fallback = _os.environ.get(
+    "INTENT_FALLBACK_TENANTS",
+    "0x83Be08FFB22b61733eDf15b0ee9Caf5562cd888d:automaton",
+)
+_FALLBACK_TENANT_MAP: dict[str, str] = {
+    pair.split(":")[0].strip().lower(): pair.split(":")[1].strip()
+    for pair in _raw_fallback.split(",")
+    if ":" in pair
 }
+
+# In-memory cache: address → tenant_id (populated from control-plane)
+_address_tenant_cache: dict[str, str] = {}
+
+
+async def _resolve_tenant_from_registry(sender: str) -> str | None:
+    """Look up the tenant_id for a sender address via control-plane agents API.
+
+    Checks in-memory cache first, then queries the control-plane agent
+    registry for agents with a matching ERC-8004 registry address
+    (the on-chain solver/agent address).
+    """
+    sender_lower = sender.lower()
+
+    # Check cache
+    if sender_lower in _address_tenant_cache:
+        return _address_tenant_cache[sender_lower]
+
+    # Query control-plane agent registry
+    try:
+        import httpx
+
+        from app.config import settings
+
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{settings.CONTROL_PLANE_URL}/agents")
+            if resp.status_code == 200:
+                items = resp.json().get("items", [])
+                for agent in items:
+                    # Match on ERC-8004 registry address (solver address)
+                    reg_addr = (agent.get("erc8004_registry_address") or "").lower()
+                    if reg_addr == sender_lower:
+                        tenant = agent.get("owner_tenant_id") or "automaton"
+                        _address_tenant_cache[sender_lower] = tenant
+                        return tenant
+    except Exception as exc:
+        logger.debug(
+            "Control-plane lookup failed, using fallback",
+            extra={"sender": sender, "error": str(exc)},
+        )
+
+    # Fall back to hardcoded map
+    tenant = _FALLBACK_TENANT_MAP.get(sender_lower)
+    if tenant:
+        _address_tenant_cache[sender_lower] = tenant
+    return tenant
 
 
 def _resolve_tenant(sender: str) -> str | None:
-    """Look up the tenant_id for a given on-chain sender address."""
-    return _AGENT_TENANT_MAP.get(sender.lower())
+    """Synchronous wrapper — check cache and fallback only.
+
+    The async path (_resolve_tenant_from_registry) is preferred.
+    This exists for backwards compatibility in sync contexts.
+    """
+    sender_lower = sender.lower()
+    cached = _address_tenant_cache.get(sender_lower)
+    if cached:
+        return cached
+    return _FALLBACK_TENANT_MAP.get(sender_lower)
 
 
 # ---------------------------------------------------------------------------
@@ -132,8 +194,10 @@ async def receive_intent(
     """
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
 
-    # Step 1: Resolve tenant from sender address
-    tenant_id = event.tenant_id or _resolve_tenant(event.sender)
+    # Step 1: Resolve tenant from sender address (async DB lookup)
+    tenant_id = event.tenant_id
+    if not tenant_id:
+        tenant_id = await _resolve_tenant_from_registry(event.sender)
     if not tenant_id:
         logger.warning(
             "Inbound intent from unregistered sender",

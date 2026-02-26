@@ -31,7 +31,9 @@ from moat_core.security_headers import SecurityHeadersMiddleware
 from app.config import settings
 from app.intent_listener import router as intent_router
 from app.middleware import RedactionMiddleware, RequestIDMiddleware
+from app.routers.discovery import router as discovery_router
 from app.routers.execute import router as execute_router
+from app.routers.skill_builder import router as skill_builder_router
 
 # Configure structured JSON logging before anything else writes to the log.
 configure_logging(level=settings.LOG_LEVEL, service_name=settings.SERVICE_NAME)
@@ -278,6 +280,8 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 app.include_router(execute_router)
 app.include_router(intent_router)
+app.include_router(discovery_router)
+app.include_router(skill_builder_router)
 
 
 @app.get("/healthz", tags=["ops"], summary="Health check")

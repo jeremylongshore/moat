@@ -134,6 +134,7 @@ test:
 	pytest $(PYTEST_FLAGS) packages/core/tests/
 	PYTHONPATH=services/control-plane pytest $(PYTEST_FLAGS) services/control-plane/tests/
 	PYTHONPATH=services/gateway pytest $(PYTEST_FLAGS) services/gateway/tests/
+	PYTHONPATH=services/mcp-server pytest $(PYTEST_FLAGS) services/mcp-server/tests/
 
 test-coverage:
 	@printf "$(BOLD)Running pytest with coverage...$(RESET)\n"

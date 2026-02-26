@@ -51,11 +51,14 @@ _MAX_GAS_LIMIT = 3_000_000
 _DEFAULT_CHAIN_ID = 11155111  # Sepolia
 
 _WEB3_RPC_DEFAULT_ALLOWLIST = (
-    "sepolia.infura.io,"
+    "eth-sepolia.g.alchemy.com,"
+    "base-sepolia.g.alchemy.com,"
     "eth-mainnet.g.alchemy.com,"
+    "base-mainnet.g.alchemy.com,"
     "polygon-mainnet.g.alchemy.com,"
     "arb-mainnet.g.alchemy.com,"
     "opt-mainnet.g.alchemy.com,"
+    "sepolia.infura.io,"
     "api.thegraph.com"
 )
 

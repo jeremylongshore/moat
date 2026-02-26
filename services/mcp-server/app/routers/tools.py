@@ -51,6 +51,7 @@ from app.http_client import (
     gw_execute_gwi_triage,
     tp_get_stats,
 )
+from app.routers.discovery import AGENT_CARDS
 
 logger = logging.getLogger(__name__)
 
@@ -481,3 +482,89 @@ async def tool_bounty_status(
         extra={"url": body.url, "capability_id": body.capability_id},
     )
     return _response("bounty.status", result, request)
+
+
+# ---------------------------------------------------------------------------
+# agents.discover
+# ---------------------------------------------------------------------------
+
+
+class AgentsDiscoverRequest(BaseModel):
+    skill_tag: str | None = Field(default=None, description="Filter by skill tag")
+
+
+@router.post(
+    "/agents.discover",
+    response_model=ToolResponse,
+    summary="List all known agents in the Moat ecosystem",
+)
+async def tool_agents_discover(
+    body: AgentsDiscoverRequest,
+    request: Request,
+    tenant_id: Annotated[str, Depends(get_current_tenant)],
+) -> ToolResponse:
+    """List all known agents with their A2A AgentCards.
+
+    **MCP Tool:** ``agents.discover``
+
+    Optionally filter by skill tag to find agents with specific capabilities.
+    """
+    agents = list(AGENT_CARDS.values())
+
+    if body.skill_tag:
+        tag_lower = body.skill_tag.lower()
+        agents = [
+            agent
+            for agent in agents
+            if any(
+                tag_lower in tag
+                for skill in agent.get("skills", [])
+                for tag in skill.get("tags", [])
+            )
+        ]
+
+    result = {"agents": agents, "total": len(agents)}
+    logger.info(
+        "Tool: agents.discover",
+        extra={"skill_tag": body.skill_tag, "total": len(agents)},
+    )
+    return _response("agents.discover", result, request)
+
+
+# ---------------------------------------------------------------------------
+# agents.card
+# ---------------------------------------------------------------------------
+
+
+class AgentsCardRequest(BaseModel):
+    agent_name: str = Field(..., description="Agent name to look up")
+
+
+@router.post(
+    "/agents.card",
+    response_model=ToolResponse,
+    summary="Get an agent's A2A AgentCard",
+)
+async def tool_agents_card(
+    body: AgentsCardRequest,
+    request: Request,
+    tenant_id: Annotated[str, Depends(get_current_tenant)],
+) -> ToolResponse:
+    """Get the full A2A AgentCard for a specific agent.
+
+    **MCP Tool:** ``agents.card``
+    """
+    card = AGENT_CARDS.get(body.agent_name)
+    if card is None:
+        result = {
+            "error": f"Agent '{body.agent_name}' not found",
+            "known_agents": list(AGENT_CARDS.keys()),
+        }
+    else:
+        result = card
+
+    logger.info(
+        "Tool: agents.card",
+        extra={"agent_name": body.agent_name, "found": card is not None},
+    )
+    return _response("agents.card", result, request)

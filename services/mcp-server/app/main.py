@@ -40,6 +40,7 @@ from moat_core.logging import configure_logging
 from moat_core.security_headers import SecurityHeadersMiddleware
 
 from app.config import settings
+from app.routers.discovery import router as discovery_router
 from app.routers.tools import router as tools_router
 from app.tool_definitions import TOOL_SCHEMAS
 
@@ -98,6 +99,9 @@ app = FastAPI(
         "- `POST /tools/bounty.triage` - Triage a GitHub issue via GWI\n"
         "- `POST /tools/bounty.execute` - Execute a fix via GWI\n"
         "- `POST /tools/bounty.status` - Composite status check\n"
+        "- `POST /tools/agents.discover` - List known agents (A2A)\n"
+        "- `POST /tools/agents.card` - Get an agent's A2A AgentCard\n"
+        "- `GET /.well-known/agent.json` - A2A discovery endpoint\n"
     ),
     version="0.1.0",
     openapi_url="/openapi.json",  # Always available — agents need schema discovery
@@ -171,6 +175,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 # Routes
 # ---------------------------------------------------------------------------
 
+app.include_router(discovery_router)
 app.include_router(tools_router)
 
 

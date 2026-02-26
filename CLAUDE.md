@@ -1,265 +1,83 @@
-# CLAUDE.md
+# Moat CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Policy-enforced execution and trust layer for AI agents. MCP-first. Every capability call produces a receipt, an outcome event, and a policy decision record. Default-deny.
 
-## What is Moat
-
-Policy-enforced execution and trust layer for AI agents. MCP-first. Every capability call produces a receipt, an outcome event, and a policy decision record. Default-deny: capabilities start inaccessible until explicitly unlocked via PolicyBundles.
-
-## Build & Dev Commands
+## Build & Dev
 
 ```bash
-# First-time setup (creates venv + installs everything)
-make setup
-source .venv/bin/activate
-
-# Install all packages in editable mode (if venv already active)
-make install
-
-# Start all 4 services locally with hot-reload (ports 8001-8004)
-make dev
-
-# Run the full CI gate (lint + typecheck + test)
-make ci
-
-# Individual checks
-make lint          # ruff check + ruff format --check
-make format        # ruff format + ruff check --fix (writes changes)
-make typecheck     # mypy (continue-on-error, non-blocking)
-make test          # pytest across all packages and services
-make test-coverage # pytest with coverage report
-
-# Run a single test file or test
-pytest packages/core/tests/test_policy.py -v
-pytest packages/core/tests/test_policy.py::test_name -v
-
-# Run a single service's tests
-pytest services/gateway/tests/ -v
-pytest services/control-plane/tests/ -v
-
-# End-to-end demo (requires services running)
-make demo
-
-# Docker
-make docker-up     # docker-compose stack (infra/local/)
-make docker-down
+make setup && source .venv/bin/activate  # First time
+make dev          # Start 4 services (ports 8001-8004)
+make ci           # Full CI gate (lint + typecheck + test)
+make lint         # ruff check + format --check
+make format       # ruff format + ruff check --fix
+make typecheck    # mypy (non-blocking)
+make test         # pytest all packages/services
+pytest packages/core/tests/test_policy.py -v  # Single test
 ```
 
 ## Architecture
 
-Four FastAPI microservices + one shared library, all Python 3.11+ (CI runs 3.12):
+Four FastAPI microservices + shared library (Python 3.11+, CI runs 3.12):
 
 ```
-packages/core (moat-core)     Shared Pydantic v2 models, policy engine, auth, redaction, DB ORM
-  └── moat_core/              Import everything from top-level: `from moat_core import Receipt, evaluate_policy`
-
+packages/core (moat-core)     Shared models, policy engine, auth, redaction, DB ORM
 services/
-  control-plane (:8001)       Capability registry, connections, vault abstraction
-  gateway (:8002)             Execution choke-point: policy → idempotency → adapter → receipt → trust-plane
-  trust-plane (:8003)         Reliability scoring, outcome event ingestion, stats
-  mcp-server (:8004)          Agent-facing tool surface (REST MVP; MCP SDK stdio planned)
+  control-plane (:8001)       Capability registry, connections, vault
+  gateway (:8002)             Execute pipeline: policy → idempotency → adapter → receipt
+  trust-plane (:8003)         Reliability scoring, outcome events
+  mcp-server (:8004)          Agent-facing tool surface (REST MVP)
 ```
 
-### moat_core import convention
+**Import convention**: Always `from moat_core import X` — never reach into sub-modules.
 
-Always import from the top-level namespace — never reach into sub-modules:
+## Key Patterns
 
-```python
-# Correct
-from moat_core import CapabilityManifest, evaluate_policy, PolicyBundle
-
-# Discouraged
-from moat_core.models import CapabilityManifest
-from moat_core.policy import evaluate_policy
-```
-
-DB access is via `moat_core.db` (lazy import): `from moat_core.db import init_tables, CapabilityRow`
-
-### Error hierarchy (`moat_core.errors`)
-
-```
-MoatError
-├── PolicyDeniedError (rule_hit, capability_id, tenant_id)
-│   └── BudgetExceededError (budget_cents, current_spend_cents, period)
-├── CapabilityNotFoundError (capability_id)
-├── AdapterError (provider, status_code, provider_request_id)
-└── IdempotencyConflictError (key)
-```
-
-### Service lifespan pattern
-
-All four services follow the same startup sequence in their `main.py` `lifespan()`:
-1. `configure_logging()` (module-level, before anything else logs)
-2. `configure_auth()` (reads `MOAT_AUTH_DISABLED` / `MOAT_JWT_SECRET`)
-3. `init_tables()` (async SQLAlchemy table creation)
-4. Service-specific store initialization
-5. Gateway only: `_seed_policy_bundles()` — registers 8 PolicyBundles for `"automaton"` tenant at startup (gwi.triage, gwi.review, gwi.issue-to-code, gwi.resolve, github.api, openai.inference, irsb.receipt, http.proxy)
-
-Middleware stack (outermost first): CORS → RequestID → Redaction (gateway only) → SecurityHeaders.
-
-### Request flow (gateway execute pipeline)
-
-1. Fetch capability from control-plane (cached 5min via `capability_cache`; falls back to synthetic stub if control-plane unreachable)
-2. Validate capability status is `active`
-3. Evaluate policy via `policy_bridge` (wires real `moat_core.policy.evaluate_policy`; default-deny if no PolicyBundle registered; fails closed on errors)
-4. Check idempotency key — return cached receipt if seen before (DB-backed, 24h TTL)
-5. Dispatch to provider adapter (`AdapterRegistry` in `app.adapters.base`; falls back to `StubAdapter`)
-6. Build Receipt
-7. Emit OutcomeEvent to trust-plane (async, best-effort)
-8. Store in idempotency cache (success only)
-9. Return Receipt
-10. (Background) Post IRSB receipt via `hooks/irsb_receipt.py` (dry-run by default; set `IRSB_DRY_RUN=false` for on-chain)
-11. (Background) Record spend for budget tracking via `policy_bridge.record_spend()` — currently 1 cent per successful call
-
-### Key domain models (`moat_core.models`)
-
-All models are frozen (immutable) Pydantic v2 with UTC datetimes:
-- **CapabilityManifest** — registry entry with semver, risk_class, domain_allowlist, input/output schemas
-- **Receipt** — audit record with SHA-256 hashed inputs/outputs (no raw secrets)
-- **OutcomeEvent** — lightweight analytics event for SLO tracking (validator requires `error_taxonomy` when `success=False`)
-- **PolicyBundle** — tenant-scoped rules: allowed_scopes, budget_daily, domain_allowlist, require_approval
-- **PolicyDecision** — immutable evaluation result with rule_hit and timing
-
-### Policy engine (`moat_core.policy.evaluate_policy`)
-
-Priority-ordered, first failure short-circuits:
-1. `no_policy_bundle` (None → deny)
-2. `scope_not_allowed`
-3. `budget_daily_exceeded`
-4. `domain_allowlist_conflict`
-5. `require_approval`
-6. `all_checks_passed` → allowed
-
-### Database layer (`moat_core.db`)
-
-Async SQLAlchemy with ORM rows: `CapabilityRow`, `ConnectionRow`, `ReceiptRow`, `OutcomeEventRow`, `PolicyBundleRow`, `IdempotencyCacheRow`. All services call `init_tables()` at startup.
-
-- **Local dev (no Docker)**: SQLite via `aiosqlite` — each service uses its own `*_dev.db` file
-- **Docker**: shared Postgres 16 via `asyncpg` (connection string from `DATABASE_URL` env var)
-- **Redis**: present in docker-compose but not yet wired into application code (v2 path for rate-limiting/caching)
-
-The only remaining in-memory stores are the `policy_bridge` bundle registry and daily spend tracker.
-
-### Authentication (`moat_core.auth`)
-
-JWT-based: `JWTConfig`, `decode_jwt()`, `create_jwt()`, FastAPI deps `get_current_tenant` / `get_optional_tenant` / `require_tenant`.
-
-- **Local dev**: `MOAT_AUTH_DISABLED=true` — uses `X-Tenant-ID` header passthrough (defaults to `"dev-tenant"`)
-- **Production**: `MOAT_JWT_SECRET` (min 32 chars) required; `configure_auth()` raises `RuntimeError` if auth disabled outside `local`/`test` environments
-- The execute endpoint validates `body.tenant_id` matches the authenticated tenant (confused deputy guard)
-
-### Adapter pattern
-
-New providers implement `AdapterInterface` (ABC in `services/gateway/app/adapters/base.py`) and register with the module-level `AdapterRegistry` singleton. Routing: `execute.py` looks up adapters by `capability.get("provider")`.
-
-Registered adapters:
-- **StubAdapter** (`provider_name="stub"`) — development/testing, simulated 100-500ms latency
-- **SlackAdapter** (`provider_name="slack"`) — Slack message delivery
-- **LocalCLIAdapter** (`provider_name="local_cli"`) — GWI commands via `asyncio.create_subprocess_exec()` (no shell), 120s timeout, 1MB output cap, GitHub URL validation
-- **HttpProxyAdapter** (`provider_name="http_proxy"`) — HTTPS proxy for sandboxed agents. Enforces domain allowlist + private IP blocking. Note: capability name is `http.proxy` but adapter provider name is `http_proxy`
-- **OpenAIProxyAdapter** (`provider_name="openai"`) — OpenAI API proxy, injects API key server-side, explicit allowlist of forwarded params, forces `stream=false`
-
-### IRSB receipt hook
-
-Post-execution hook at `services/gateway/app/hooks/irsb_receipt.py` fires as a background task after every successful gateway execution. Default **dry-run** (`IRSB_DRY_RUN=true`).
-
-- 5-hash computation (keccak256): intent, result, constraints, route, evidence
-- ABI-encoded message hash over 11 fields, EIP-191 signing with `eth_account`
-- On-chain submission to IntentReceiptHub at `0xD66A1e880AA3939CA066a9EA1dD37ad3d01D977c` on Sepolia
-- Fallback chain: `dry_run` → `dry_run_no_rpc` → `dry_run_no_key`
-- Intent hash is a **placeholder** — not yet a Canonical Intent Envelope per `041-AT-SPEC`; only hash computation will change when CIE lands
-
-### Policy bridge
-
-`services/gateway/app/policy_bridge.py` wires `moat_core.policy.evaluate_policy()`. Includes in-memory PolicyBundle registry and daily spend tracking.
-
-**Architectural note**: This policy engine is a stepping stone. When IRSB Phase 2 lands, it will be replaced by Cedar policies inside the Intentions Gateway. Keep rules simple and portable.
-
-### Trust plane scoring
-
-DB-backed rolling 7-day window. Configurable thresholds:
-- `MIN_SUCCESS_RATE_7D=0.80` — below this after 5+ executions, `should_hide()` suppresses capability
-- `MAX_P95_LATENCY_MS=10000` — above this, `should_throttle()` kicks in
-- `verified` flag requires 10+ executions AND success rate >= threshold
+- **Policy engine**: Priority-ordered, first-failure short-circuits. no_policy_bundle → scope → budget → domain → approval → allowed
+- **Service lifespan**: configure_logging → configure_auth → init_tables → store init → (gateway: seed PolicyBundles)
+- **Execute pipeline**: fetch capability → validate active → evaluate policy → idempotency check → adapter dispatch → receipt → outcome event → cache
+- **Auth**: JWT-based. Dev: `MOAT_AUTH_DISABLED=true` uses `X-Tenant-ID` header. Prod: `MOAT_JWT_SECRET` required.
+- **DB**: Async SQLAlchemy. Local: SQLite per-service. Docker: shared Postgres 16.
+- **Adapters**: StubAdapter, SlackAdapter, LocalCLIAdapter, HttpProxyAdapter, OpenAIProxyAdapter, Web3Adapter, A2AProxyAdapter — implement `AdapterInterface` and register with `AdapterRegistry`
+- **A2A Discovery**: Both mcp-server and gateway serve `/.well-known/agent.json` (AgentCard per A2A v0.3.0)
+- **Agent Registry**: Control-plane CRUD at `/agents` — supports ERC-8004 on-chain identity + SPIFFE IDs
+- **Skill Builder**: `POST /skill-builder/register` auto-discovers A2A agents and registers their skills as Moat capabilities
+- **ERC-8004**: `services/gateway/app/erc8004/` — metadata generation, on-chain registry sync, IPFS pinning, ERC-6551 TBA
+- **Intent Bridge**: Gateway `/intents/inbound` — routes on-chain intents through execution pipeline with dynamic tenant resolution via agent registry
 
 ## Testing
 
-### Test structure and conftest patterns
-
-Each service's `conftest.py` follows the same pattern:
-1. Inserts the service root onto `sys.path` so `from app.xxx` resolves to *that* service's `app/` package
-2. Creates a temp SQLite DB via `tempfile.mkstemp` and sets `DATABASE_URL` env var
-3. Sets `MOAT_AUTH_DISABLED=true`
-
-The root `conftest.py` only ensures `packages/core` is importable — it contains no fixtures. This file is required to prevent `--import-mode=importlib` namespace conflicts across multiple `tests/` directories.
-
-### Gateway test fixtures (`services/gateway/tests/conftest.py`)
-
-- `mock_get_capability` — patches `app.routers.execute.get_capability`; returns mock capabilities for `test-cap-123` (stub), `slack-cap-123` (slack), `inactive-cap` (inactive), `None` otherwise
-- `mock_emit_outcome` — patches `app.routers.execute._emit_outcome_event` as `AsyncMock`
-- `test_client` — depends on both mocks; registers a `PolicyBundle` for `dev-tenant:test-cap-123` (budget 100k cents); yields `TestClient(app)`
-
-When writing gateway tests, you must register a PolicyBundle for your test capability via `register_policy_bundle()` or the default-deny policy will reject every request.
-
-### CI test quirk
-
-In CI, service tests run via `PYTHONPATH=services/<svc>` (NOT editable installs) to avoid `app` package name collisions between services. Locally, `pip install -e` works fine because pytest collects one service at a time.
-
-### pytest configuration
-
-- `asyncio_mode = "auto"` — async test functions run automatically, no `@pytest.mark.asyncio` needed
-- `--import-mode=importlib` — prevents namespace package conflicts across service `tests/` dirs
-- Markers: `@pytest.mark.unit`, `@pytest.mark.integration`, `@pytest.mark.slow`, `@pytest.mark.docker`
-- Coverage floor: `fail_under = 50`
-
-## Monorepo layout
-
-- Each service has its own `pyproject.toml` with hatchling build and `app/` package
-- Root `pyproject.toml` configures shared ruff/mypy/pytest settings (line-length 120)
-- Services depend on `moat-core` as a pip dependency (installed editable via `-e packages/core`)
-- `infra/local/` — docker-compose (Postgres 16 + Redis 7), `.env.example`
-- `000-docs/` — 11 design docs using doc-filing system (NNN-CC-ABCD format); check relevant docs before architectural decisions
-- `scripts/dev.sh` — starts all 4 uvicorn processes with `--reload`; checks ports 8001-8004 are free; auto-installs all packages
-- `scripts/demo.sh` — health-checks services (auto-starts if down), registers a capability, executes it, fetches stats
-
-### Environment variables (key ones)
-
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `MOAT_ENV` | `local` | Controls OpenAPI docs exposure (only in local/test/dev) |
-| `MOAT_AUTH_DISABLED` | `false` | Header-based tenant passthrough for dev |
-| `MOAT_JWT_SECRET` | `""` | JWT signing key (min 32 chars in prod) |
-| `DATABASE_URL` | `sqlite+aiosqlite:///./X_dev.db` | Per-service DB; Postgres in Docker |
-| `HTTP_PROXY_DOMAIN_ALLOWLIST` | `""` | Comma-separated allowed domains for http.proxy |
-| `IRSB_DRY_RUN` | `true` | Set `false` for on-chain receipt submission |
-| `SLACK_BOT_TOKEN` | `""` | Slack adapter token |
-
-## HTTP Proxy Capability
-
-The `http.proxy` capability enables sandboxed agents to make outbound HTTP requests through Moat with domain enforcement.
-
-**PolicyBundle** registered in `services/gateway/app/main.py`:
-- Scopes: `["http.get", "http.post"]`
-- Domain allowlist: loaded from `HTTP_PROXY_DOMAIN_ALLOWLIST` env var
-- Budget: $150/day (15000 cents)
-
-**Usage from agent**: `POST /execute/http.proxy` with body `{"url": "https://api.github.com/...", "method": "GET"}`. Header `X-Tenant-ID: automaton` required when auth is disabled.
+- Each service conftest: inserts service root on sys.path, creates temp SQLite, sets auth disabled
+- Gateway tests: must register PolicyBundle for test capabilities (default-deny rejects otherwise)
+- CI: uses `PYTHONPATH=services/<svc>` not editable installs (avoids `app` package collisions)
+- Config: `asyncio_mode = "auto"`, `--import-mode=importlib`, coverage floor 50%
 
 ## Conventions
 
-- **Commit format**: `<type>(<scope>): <subject>` — types: feat, fix, docs, test, ci, chore, refactor
-- **Logging**: structured JSON to stdout, per-service. Sensitive fields auto-redacted via `RedactionMiddleware` and `moat_core.redaction`.
-- **Secrets**: credentials live in vault abstraction (`control-plane/app/vault.py`); agents never see raw secrets. Receipt stores only SHA-256 hashes.
-- **Request tracing**: `X-Request-ID` header propagated across services via middleware.
-- **Security headers**: `SecurityHeadersMiddleware` on all services (HSTS, X-Frame-Options DENY, nosniff, no-cache).
+- **Commits**: `<type>(<scope>): <subject>` (feat, fix, docs, test, ci, chore, refactor)
 - **License**: Elastic License 2.0
+- **Secrets**: vault abstraction, receipts store SHA-256 hashes only
+- **Tracing**: `X-Request-ID` propagated via middleware
 
-## CI/CD
+## ERC-8004 / Web3 Modules
 
-GitHub Actions (`.github/workflows/ci.yml`) — Python 3.12, 7 jobs:
-- **lint** (ruff check + format)
-- **typecheck** (mypy, continue-on-error)
-- **test** (pytest + coverage, needs lint)
-- **security** (pip-audit, needs test)
-- **docker** (3x matrix: gateway, control-plane, trust-plane — BuildKit cache)
-- **integration** (Docker Compose end-to-end, main-only: health checks, execute pipeline, policy default-deny)
+```
+services/gateway/app/erc8004/
+  metadata.py        Build ERC-8004 registration JSON from agent data
+  registry_sync.py   On-chain register/update agent identity (dry-run default)
+  ipfs.py            Pin metadata to IPFS via Pinata (dry-run default)
+  tba.py             ERC-6551 Token Bound Account for agent NFTs (dry-run default)
+```
+
+Env vars: `ERC8004_DRY_RUN`, `ERC8004_IDENTITY_REGISTRY`, `ERC8004_OPERATOR_KEY`, `PINATA_JWT`, `IPFS_DRY_RUN`, `ERC6551_DRY_RUN`
+
+## A2A Protocol Integration
+
+- **Models** (`moat_core`): AgentSkill, AgentCard, A2ATask, A2AMessage, A2AArtifact, A2ATaskStatus
+- **Discovery** (mcp-server + gateway): `GET /.well-known/agent.json` serves AgentCards
+- **Agent Registry** (control-plane): `POST/GET/PATCH/DELETE /agents` with ERC-8004 + SPIFFE fields
+- **A2A Proxy Adapter** (gateway): Forwards execution to remote A2A agents via JSON-RPC tasks/send
+- **Skill Builder** (gateway): `POST /skill-builder/register` → discovers agent → registers skills as capabilities
+
+## Reference
+
+For detailed docs (error hierarchy, model fields, adapter specifics, env vars, IRSB hook): see `000-docs/`

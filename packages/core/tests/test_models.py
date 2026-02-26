@@ -14,6 +14,14 @@ import pytest
 from pydantic import ValidationError
 
 from moat_core import (
+    A2AArtifact,
+    A2AMessage,
+    A2ATask,
+    A2ATaskStatus,
+    AgentCapabilities,
+    AgentCard,
+    AgentProvider,
+    AgentSkill,
     CapabilityManifest,
     CapabilityStatus,
     ErrorTaxonomy,
@@ -386,3 +394,106 @@ class TestEnums:
             "policy_denied",
             "unknown",
         }
+
+    def test_a2a_task_status_values(self) -> None:
+        assert set(A2ATaskStatus) == {
+            "submitted",
+            "working",
+            "input-required",
+            "completed",
+            "canceled",
+            "failed",
+        }
+
+
+# ---------------------------------------------------------------------------
+# A2A Protocol Models
+# ---------------------------------------------------------------------------
+
+
+class TestAgentSkill:
+    def test_minimal(self) -> None:
+        s = AgentSkill(id="exec", name="Execute")
+        assert s.id == "exec"
+        assert s.tags == []
+
+    def test_full(self) -> None:
+        s = AgentSkill(
+            id="exec",
+            name="Execute",
+            description="Run a capability",
+            tags=["execute", "gateway"],
+            examples=["Execute cap-123"],
+        )
+        assert len(s.tags) == 2
+
+
+class TestAgentCard:
+    def test_minimal(self) -> None:
+        card = AgentCard(
+            name="test-agent",
+            url="http://localhost:9000",
+        )
+        assert card.name == "test-agent"
+        assert card.provider.organization == "Moat"
+        assert card.version == "0.1.0"
+        assert card.capabilities.streaming is False
+
+    def test_full(self) -> None:
+        card = AgentCard(
+            name="moat-gateway",
+            description="Execution gateway",
+            url="http://localhost:8002",
+            provider=AgentProvider(organization="Moat", url="https://moat.dev"),
+            version="0.2.0",
+            documentation_url="/docs",
+            capabilities=AgentCapabilities(streaming=True),
+            authentication={"schemes": ["bearer"]},
+            skills=[
+                AgentSkill(id="execute", name="Execute Capability"),
+            ],
+        )
+        assert card.capabilities.streaming is True
+        assert len(card.skills) == 1
+
+    def test_immutable(self) -> None:
+        card = AgentCard(name="test", url="http://localhost:9000")
+        with pytest.raises(ValidationError):
+            card.name = "changed"
+
+
+class TestA2ATask:
+    def test_defaults(self) -> None:
+        task = A2ATask()
+        assert task.status == A2ATaskStatus.SUBMITTED
+        assert task.messages == []
+        assert task.artifacts == []
+
+    def test_with_messages(self) -> None:
+        msg = A2AMessage(
+            role="user",
+            parts=[{"type": "text", "text": "Hello"}],
+        )
+        task = A2ATask(
+            messages=[msg],
+            status=A2ATaskStatus.WORKING,
+        )
+        assert len(task.messages) == 1
+        assert task.status == A2ATaskStatus.WORKING
+
+    def test_with_artifacts(self) -> None:
+        art = A2AArtifact(
+            name="result.json",
+            parts=[{"type": "data", "data": {"key": "value"}}],
+        )
+        task = A2ATask(
+            artifacts=[art],
+            status=A2ATaskStatus.COMPLETED,
+        )
+        assert len(task.artifacts) == 1
+
+    def test_unique_ids(self) -> None:
+        t1 = A2ATask()
+        t2 = A2ATask()
+        assert t1.id != t2.id
+        assert t1.session_id != t2.session_id

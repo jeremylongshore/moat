@@ -29,6 +29,7 @@ from moat_core.logging import configure_logging
 from moat_core.security_headers import SecurityHeadersMiddleware
 
 from app.config import settings
+from app.routers.agents import router as agent_router
 from app.routers.capabilities import router as capability_router
 from app.routers.connections import router as connection_router
 
@@ -48,7 +49,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     from moat_core.auth import AuthConfig, configure_auth
     from moat_core.db import create_engine, create_session_factory, init_tables
 
-    from app.store import capability_store, connection_store
+    from app.store import agent_store, capability_store, connection_store
 
     logger.info(
         "Control plane starting",
@@ -74,6 +75,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Wire stores
     capability_store.configure(session_factory)
     connection_store.configure(session_factory)
+    agent_store.configure(session_factory)
 
     logger.info(
         "Database initialized", extra={"auth_disabled": settings.MOAT_AUTH_DISABLED}
@@ -173,6 +175,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 # Routes
 # ---------------------------------------------------------------------------
 
+app.include_router(agent_router)
 app.include_router(capability_router)
 app.include_router(connection_router)
 
