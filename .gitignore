@@ -49,3 +49,7 @@ Thumbs.db
 secrets/
 *.pem
 *.key
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db
