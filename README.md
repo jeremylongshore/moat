@@ -7,6 +7,8 @@ Moat is not an API marketplace. It is the verified execution layer where agents 
 **Interfaces:** MCP (primary) + REST/OpenAPI (fallback)
 **License:** [Elastic License 2.0](LICENSE)
 
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/U5S225PTME)
+
 ## Core Guarantees
 
 - **Receipt on every call** - append-only audit trail, idempotency, replay-ready
