@@ -57,7 +57,7 @@ jobs:
           cache: pip
 
       - name: Install ruff
-        run: pip install ruff>=0.4.0
+        run: pip install 'ruff>=0.16,<0.17'
 
       - name: ruff check (lint)
         run: ruff check packages/ services/
@@ -88,7 +88,7 @@ jobs:
 
       - name: Install all packages (editable) + dev deps
         run: |
-          pip install mypy>=1.9.0 pydantic>=2.0.0
+          pip install 'mypy>=1.9.0' 'pydantic>=2.0.0'
           pip install -e packages/core
           pip install -e packages/cli
           pip install -e services/control-plane
@@ -97,7 +97,17 @@ jobs:
           pip install -e services/mcp-server
 
       - name: mypy
-        run: mypy packages/ services/ --config-file pyproject.toml
+        # One run per package. Four services each ship a top-level `app` package, so a
+        # single whole-tree run died on 'Duplicate module named "app"' before checking
+        # anything. Every package is checked; the step fails if any of them does.
+        run: |
+          rc=0
+          for target in packages/core packages/cli services/control-plane services/gateway services/trust-plane services/mcp-server; do
+            echo "::group::mypy $target"
+            (cd "$target" && mypy . --config-file "$GITHUB_WORKSPACE/pyproject.toml") || rc=1
+            echo "::endgroup::"
+          done
+          exit "$rc"
 
   # ───────────────────────────────────────────────────────────────────────────
   # test
@@ -187,7 +197,7 @@ jobs:
 
       - name: Install pip-audit + all project packages
         run: |
-          pip install pip-audit>=2.7.0
+          pip install 'pip-audit>=2.7.0'
           pip install -r requirements-dev.txt
           pip install -e packages/core
           pip install -e packages/cli
