@@ -31,6 +31,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from typing import Any
 
@@ -48,9 +49,7 @@ router = APIRouter(prefix="/intents", tags=["web3-bridge"])
 
 # Fallback mapping for known addresses when control-plane is unreachable.
 # Loaded from env: INTENT_FALLBACK_TENANTS="0xAddr1:tenant1,0xAddr2:tenant2"
-import os as _os
-
-_raw_fallback = _os.environ.get(
+_raw_fallback = os.environ.get(
     "INTENT_FALLBACK_TENANTS",
     "0x83Be08FFB22b61733eDf15b0ee9Caf5562cd888d:automaton",
 )

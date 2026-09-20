@@ -659,9 +659,9 @@ class TestDryRunMode:
         ):
             import asyncio
 
-            asyncio.get_event_loop().run_until_complete(
-                post_irsb_receipt(_make_receipt())
-            )
+            # asyncio.run owns its loop. get_event_loop() depended on a loop left
+            # behind by an earlier test, so this passed alone and failed in the file.
+            asyncio.run(post_irsb_receipt(_make_receipt()))
 
         submit_mock.assert_not_called()
 
