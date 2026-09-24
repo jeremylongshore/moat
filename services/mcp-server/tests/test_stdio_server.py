@@ -25,7 +25,9 @@ async def test_list_tools_returns_every_defined_tool():
 
 
 async def test_unknown_tool_is_a_normal_error_payload():
-    result = await srv._on_call_tool(None, CallToolRequestParams(name="nope", arguments={}))
+    result = await srv._on_call_tool(
+        None, CallToolRequestParams(name="nope", arguments={})
+    )
     assert not result.is_error
     assert json.loads(result.content[0].text) == {"error": "Unknown tool: nope"}
 
@@ -36,7 +38,10 @@ async def test_a_raising_tool_becomes_is_error_not_a_protocol_failure(monkeypatc
 
     monkeypatch.setattr(srv, "tp_get_stats", boom)
     result = await srv._on_call_tool(
-        None, CallToolRequestParams(name="capabilities.stats", arguments={"capability_id": "x"})
+        None,
+        CallToolRequestParams(
+            name="capabilities.stats", arguments={"capability_id": "x"}
+        ),
     )
     assert result.is_error
     assert "upstream down" in result.content[0].text

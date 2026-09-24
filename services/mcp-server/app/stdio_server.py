@@ -354,7 +354,9 @@ async def _handle_agents_card(args: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-async def _on_list_tools(ctx: Any, params: PaginatedRequestParams | None) -> ListToolsResult:
+async def _on_list_tools(
+    ctx: Any, params: PaginatedRequestParams | None
+) -> ListToolsResult:
     """2.x handler shape around list_tools(); pagination is not used (10 tools)."""
     return ListToolsResult(tools=await list_tools())
 
@@ -368,7 +370,9 @@ async def _on_call_tool(ctx: Any, params: CallToolRequestParams) -> CallToolResu
         return CallToolResult(content=content)
     except Exception as exc:  # noqa: BLE001 - every failure becomes a tool error result
         logger.exception("tool %s failed", params.name)
-        return CallToolResult(content=_text({"error": f"{type(exc).__name__}: {exc}"}), is_error=True)
+        return CallToolResult(
+            content=_text({"error": f"{type(exc).__name__}: {exc}"}), is_error=True
+        )
 
 
 server = Server("moat-mcp", on_list_tools=_on_list_tools, on_call_tool=_on_call_tool)
