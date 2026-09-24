@@ -42,7 +42,14 @@ import logging
 from typing import Any
 
 from mcp.server import Server
-from mcp.types import TextContent, Tool
+from mcp.types import (
+    CallToolRequestParams,
+    CallToolResult,
+    ListToolsResult,
+    PaginatedRequestParams,
+    TextContent,
+    Tool,
+)
 
 from app.http_client import (
     cp_list_capabilities,
@@ -57,7 +64,9 @@ logger = logging.getLogger(__name__)
 # MCP Server instance
 # ---------------------------------------------------------------------------
 
-server = Server("moat-mcp")
+# The Server instance is constructed at the bottom of this module, after the
+# handlers exist: MCP Python SDK 2.x registers handlers through the constructor
+# (on_list_tools / on_call_tool) instead of the 1.x decorators.
 
 # Default tenant for the scout agent
 _DEFAULT_TENANT = "automaton"
@@ -68,7 +77,6 @@ _DEFAULT_TENANT = "automaton"
 # ---------------------------------------------------------------------------
 
 
-@server.list_tools()
 async def list_tools() -> list[Tool]:
     """Return all 8 Moat tools with their schemas."""
     return [
@@ -103,7 +111,6 @@ def _text(data: Any) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(data, indent=2, default=str))]
 
 
-@server.call_tool()
 async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
     """Dispatch a tool call to the appropriate handler."""
     tenant = arguments.pop("tenant_id", _DEFAULT_TENANT)
@@ -340,6 +347,35 @@ async def _handle_agents_card(args: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# MCP SDK 2.x adapters + server instance
+# ---------------------------------------------------------------------------
+
+
+async def _on_list_tools(
+    ctx: Any, params: PaginatedRequestParams | None
+) -> ListToolsResult:
+    """2.x handler shape around list_tools(); pagination is not used (10 tools)."""
+    return ListToolsResult(tools=await list_tools())
+
+
+async def _on_call_tool(ctx: Any, params: CallToolRequestParams) -> CallToolResult:
+    """2.x handler shape around call_tool(). The 1.x decorator turned a raised
+    exception into an isError result; keep that contract rather than let the
+    session see a protocol error."""
+    try:
+        content = await call_tool(params.name, dict(params.arguments or {}))
+        return CallToolResult(content=content)
+    except Exception as exc:  # noqa: BLE001 - every failure becomes a tool error result
+        logger.exception("tool %s failed", params.name)
+        return CallToolResult(
+            content=_text({"error": f"{type(exc).__name__}: {exc}"}), is_error=True
+        )
+
+
+server = Server("moat-mcp", on_list_tools=_on_list_tools, on_call_tool=_on_call_tool)
 
 
 async def _run() -> None:
