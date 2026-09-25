@@ -49,3 +49,7 @@ bd.db
 # They would override fork protection in .git/info/exclude.
 # Config files (metadata.json, config.yaml) are tracked by git by default
 # since no pattern above ignores them.
+
+# bd runtime state (machine-local)
+export-state.json
+dolt-monitor.pid.lock
