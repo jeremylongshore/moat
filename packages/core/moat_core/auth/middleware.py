@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Annotated
 
@@ -198,7 +199,9 @@ async def get_optional_tenant(
     return payload.tenant_id if payload else None
 
 
-def require_tenant(tenant_id_param: str = "tenant_id"):
+def require_tenant(
+    tenant_id_param: str = "tenant_id",
+) -> Callable[[Request, _Credentials], Awaitable[str]]:
     """Dependency factory that validates tenant_id in request body matches JWT.
 
     Use this for endpoints where tenant_id is in the request body and must

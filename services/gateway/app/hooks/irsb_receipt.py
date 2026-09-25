@@ -462,6 +462,12 @@ async def _submit_on_chain(
 
     Returns dict with tx_hash, receipt_id, and status.
     """
+    # post_irsb_receipt() already falls back to dry-run without a key; bind a
+    # narrowed local so the signer never receives None.
+    private_key = SOLVER_PRIVATE_KEY
+    if not private_key:
+        raise RuntimeError("IRSB solver signing key is not configured")
+
     from web3 import Web3
 
     w3 = Web3(Web3.HTTPProvider(SEPOLIA_RPC_URL))
@@ -483,7 +489,7 @@ async def _submit_on_chain(
         created_at=created_at,
         expiry=expiry,
         solver_id=solver_id,
-        private_key=SOLVER_PRIVATE_KEY,
+        private_key=private_key,
     )
 
     # Build the receipt tuple
@@ -502,7 +508,7 @@ async def _submit_on_chain(
     # Get sender account
     from eth_account import Account
 
-    account = Account.from_key(SOLVER_PRIVATE_KEY)
+    account = Account.from_key(private_key)
     sender = account.address
 
     # Build transaction

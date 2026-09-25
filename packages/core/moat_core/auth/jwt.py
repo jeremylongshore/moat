@@ -14,10 +14,14 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import jwt
 from jwt.exceptions import ExpiredSignatureError, InvalidTokenError
+
+if TYPE_CHECKING:
+    # Type-only: jwt.types.Options ships in newer PyJWT than the >=2.8 floor.
+    from jwt.types import Options
 
 
 @dataclass(frozen=True)
@@ -68,7 +72,7 @@ def decode_jwt(token: str, config: JWTConfig) -> JWTPayload:
         JWTInvalidError: If the token is malformed or signature fails.
     """
     try:
-        options = {"require": ["sub", "exp", "iat"]}
+        options: Options = {"require": ["sub", "exp", "iat"]}
         if config.issuer:
             options["require"].append("iss")
 
