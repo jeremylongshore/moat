@@ -68,13 +68,12 @@ skip-magic-trailing-comma = false
 [tool.mypy]
 python_version = "3.11"
 explicit_package_bases = true
+# Anchored to this file: CI runs mypy from inside each package directory, and
+# relative entries resolved against that cwd, so every cross-package import
+# (moat_core) silently became Any under ignore_missing_imports.
 mypy_path = [
-    "packages/core",
-    "packages/cli",
-    "services/control-plane",
-    "services/gateway",
-    "services/trust-plane",
-    "services/mcp-server",
+    "$MYPY_CONFIG_FILE_DIR/packages/core",
+    "$MYPY_CONFIG_FILE_DIR/packages/cli",
 ]
 
 # Not full strict mode yet – allow gradual adoption.
