@@ -26,6 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from moat_core.logging import configure_logging
 from moat_core.security_headers import SecurityHeadersMiddleware
+from starlette.middleware.base import RequestResponseEndpoint
 
 from app.config import settings
 from app.routers.events import router as events_router
@@ -107,12 +108,14 @@ app.add_middleware(SecurityHeadersMiddleware)
 
 
 @app.middleware("http")
-async def request_id_middleware(request: Request, call_next: object) -> Response:
+async def request_id_middleware(
+    request: Request, call_next: RequestResponseEndpoint
+) -> Response:
     request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
     request.state.request_id = request_id
     start = time.monotonic()
 
-    response: Response = await call_next(request)  # type: ignore[arg-type]
+    response: Response = await call_next(request)
     duration_ms = (time.monotonic() - start) * 1000
 
     response.headers["X-Request-ID"] = request_id

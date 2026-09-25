@@ -22,7 +22,7 @@ import uuid
 from typing import Any
 
 from fastapi import Request, Response
-from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.types import ASGIApp
 
 logger = logging.getLogger(__name__)
@@ -79,12 +79,14 @@ class RedactionMiddleware(BaseHTTPMiddleware):
     def __init__(self, app: ASGIApp) -> None:
         super().__init__(app)
 
-    async def dispatch(self, request: Request, call_next: object) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         # Attach a mutable log context dict to state so handlers can add fields
         # without worrying about accidental secret leakage.
-        request.state.log_context: dict[str, Any] = {}
+        request.state.log_context = {}
 
-        response: Response = await call_next(request)  # type: ignore[arg-type]
+        response: Response = await call_next(request)
 
         # Redact the context before it can be emitted.
         safe_ctx = redact_dict(request.state.log_context)
@@ -104,12 +106,14 @@ class RequestIDMiddleware(BaseHTTPMiddleware):
     the ``X-Request-ID`` response header.
     """
 
-    async def dispatch(self, request: Request, call_next: object) -> Response:
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
         request.state.request_id = request_id
 
         start = time.monotonic()
-        response: Response = await call_next(request)  # type: ignore[arg-type]
+        response: Response = await call_next(request)
         duration_ms = (time.monotonic() - start) * 1000
 
         response.headers["X-Request-ID"] = request_id

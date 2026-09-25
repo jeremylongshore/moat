@@ -9,6 +9,7 @@ via the DATABASE_URL connection string.
 
 from __future__ import annotations
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -16,6 +17,9 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase
+
+# Arbitrary constant identifying the schema-init advisory lock ("moatinit").
+_INIT_LOCK_KEY = 0x6D6F6174696E6974
 
 
 class Base(DeclarativeBase):
@@ -57,6 +61,16 @@ async def init_tables(engine: AsyncEngine) -> None:
 
     Safe to call repeatedly - uses ``CREATE TABLE IF NOT EXISTS``.
     In production, prefer Alembic migrations over this function.
+
+    On PostgreSQL the DDL runs under a transaction-scoped advisory lock.
+    Several services share one database and call this at startup; without
+    the lock, two concurrent ``create_all`` runs against a fresh database
+    race on the implicit row types and one dies with a
+    ``pg_type_typname_nsp_index`` unique violation.
     """
     async with engine.begin() as conn:
+        if conn.dialect.name == "postgresql":
+            await conn.execute(
+                text("SELECT pg_advisory_xact_lock(:key)"), {"key": _INIT_LOCK_KEY}
+            )
         await conn.run_sync(Base.metadata.create_all)

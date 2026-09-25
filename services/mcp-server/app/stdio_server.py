@@ -288,6 +288,8 @@ async def _handle_bounty_status(args: dict[str, Any], tenant: str) -> dict[str, 
         )
     )
 
+    stats: dict[str, Any] | BaseException
+    triage: dict[str, Any] | BaseException
     stats, triage = await asyncio.gather(
         stats_task, triage_task, return_exceptions=True
     )
@@ -295,10 +297,10 @@ async def _handle_bounty_status(args: dict[str, Any], tenant: str) -> dict[str, 
     return {
         "url": url,
         "trust_stats": stats
-        if not isinstance(stats, Exception)
+        if not isinstance(stats, BaseException)
         else {"error": str(stats)},
         "triage_result": triage
-        if not isinstance(triage, Exception)
+        if not isinstance(triage, BaseException)
         else {"error": str(triage)},
     }
 

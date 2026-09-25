@@ -194,7 +194,7 @@ async def receive_intent(
     request_id = getattr(request.state, "request_id", str(uuid.uuid4()))
 
     # Step 1: Resolve tenant from sender address (async DB lookup)
-    tenant_id = event.tenant_id
+    tenant_id: str | None = event.tenant_id
     if not tenant_id:
         tenant_id = await _resolve_tenant_from_registry(event.sender)
     if not tenant_id:
