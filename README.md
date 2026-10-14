@@ -1,5 +1,11 @@
 # Moat
 
+<!-- intent-select-partner:start -->
+<p><a href="https://intentsolutions.io/"><img src="https://raw.githubusercontent.com/intent-solutions-io/.github/b82af5d3e7951d85e39ea9e65cc24ee8278722a7/assets/brand/claude-select-partner.svg" alt="Intent Solutions: Claude Partner Network Select Services Partner" width="300" height="95" /></a></p>
+
+Intent Solutions is a Claude Partner Network Select Services Partner.
+<!-- intent-select-partner:end -->
+
 **Policy-enforced execution and trust layer for AI agents. MCP-first.**
 
 Moat is not an API marketplace. It is the verified execution layer where agents call **capabilities** (method-level tool contracts), not connectors. Every call produces a receipt, an outcome event, and a policy decision record.
